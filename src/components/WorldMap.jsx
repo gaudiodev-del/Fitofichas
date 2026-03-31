@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { NUM2, CTRD, MAP_COLORS, P } from "../constants";
 
+const W = 1000, H = 507;
+const proj = ([lon, lat]) => [
+  ((lon + 180) / 360) * W,
+  ((90 - lat) / 180) * H,
+];
+
 export default function WorldMap({presencia}) {
   const [paths, setPaths] = useState(null); // null=cargando, []=error, array=ok
   const [tt, setTt] = useState(null);
@@ -26,11 +32,6 @@ export default function WorldMap({presencia}) {
       .then(r => r.json())
       .then(topo => {
         if (cancelled) return;
-        const W = 1000, H = 507;
-        const proj = ([lon, lat]) => [
-          ((lon + 180) / 360) * W,
-          ((90 - lat) / 180) * H,
-        ];
         const features = window.topojson.feature(topo, topo.objects.countries).features;
         const result = features.map(feat => {
           const iso2 = NUM2[parseInt(feat.id)] || null;
@@ -44,9 +45,15 @@ export default function WorldMap({presencia}) {
               if (!ring.length) return;
               const [x0, y0] = proj(ring[0]);
               d += `M${x0.toFixed(1)},${y0.toFixed(1)}`;
+              let prevX = x0;
               for (let i = 1; i < ring.length; i++) {
                 const [x, y] = proj(ring[i]);
-                d += `L${x.toFixed(1)},${y.toFixed(1)}`;
+                if (Math.abs(x - prevX) > 500) {
+                  d += `M${x.toFixed(1)},${y.toFixed(1)}`;
+                } else {
+                  d += `L${x.toFixed(1)},${y.toFixed(1)}`;
+                }
+                prevX = x;
               }
               d += "Z";
             });
@@ -98,6 +105,7 @@ export default function WorldMap({presencia}) {
         {paths && Object.entries(pMap).map(([iso2, pres]) => {
           const c = CTRD[iso2];
           if (!c) return null;
+          const [cx, cy] = proj([c.lon, c.lat]);
           const col = MAP_COLORS[pres.estado] || MAP_COLORS.presente;
           const isARG = !!c.arg;
           return (
@@ -108,12 +116,12 @@ export default function WorldMap({presencia}) {
                 setTt({ x: e.clientX - r.left, y: e.clientY - r.top, name: pres.nombre || c.n, st: pres.estado, col: col.fill });
               }}
               onMouseLeave={() => setTt(null)}>
-              {isARG && <circle cx={c.x} cy={c.y} r={14} fill="none" stroke="#fff" strokeWidth={2.5} opacity={0.8} />}
-              {isARG && <circle cx={c.x} cy={c.y} r={14} fill="none" stroke={col.fill} strokeWidth={2} opacity={0.9} />}
-              <circle cx={c.x} cy={c.y} r={isARG ? 8 : 5}
+              {isARG && <circle cx={cx} cy={cy} r={14} fill="none" stroke="#fff" strokeWidth={2.5} opacity={0.8} />}
+              {isARG && <circle cx={cx} cy={cy} r={14} fill="none" stroke={col.fill} strokeWidth={2} opacity={0.9} />}
+              <circle cx={cx} cy={cy} r={isARG ? 8 : 5}
                 fill={col.fill} stroke="#fff" strokeWidth={isARG ? 2 : 1.5} />
               {isARG && (
-                <text x={c.x} y={c.y + 24} textAnchor="middle"
+                <text x={cx} y={cy + 24} textAnchor="middle"
                   fill={P.navy} fontSize={8} fontFamily="monospace" fontWeight="bold">ARG</text>
               )}
             </g>
