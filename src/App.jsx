@@ -17,6 +17,9 @@ export default function App() {
   const [view, setView] = useState(null);
   const [edit, setEdit] = useState(null);
   const [del, setDel] = useState(null);
+  const [filterTipo, setFilterTipo] = useState(null);
+  const [filterSinavimo, setFilterSinavimo] = useState(null);
+  const [sortKey, setSortKey] = useState("alpha_asc");
 
   useEffect(() => {
     try {
@@ -57,6 +60,20 @@ export default function App() {
   const upd = (k, v) => setEdit(p => ({ ...p, [k]: v }));
   const updT = (k, v) => setEdit(p => ({ ...p, taxonomia: { ...p.taxonomia, [k]: v } }));
   const types = new Set(fichas.map(f => f.tipoplaga).filter(Boolean));
+  const sinavimoVals = new Set(fichas.map(f => f.condicion_sinavimo || "Desconocida"));
+  const avgImpact = f => f.impacto_comercial ? IMPACT_CATS.reduce((s, c) => s + (f.impacto_comercial[c.key] || 0), 0) / IMPACT_CATS.length : -1;
+  const fichasFiltradas = fichas
+    .filter(f =>
+      (!filterTipo || f.tipoplaga === filterTipo) &&
+      (!filterSinavimo || (f.condicion_sinavimo || "Desconocida") === filterSinavimo)
+    )
+    .sort((a, b) => {
+      if (sortKey === "alpha_asc") return (a.nombre_cientifico || "").localeCompare(b.nombre_cientifico || "");
+      if (sortKey === "alpha_desc") return (b.nombre_cientifico || "").localeCompare(a.nombre_cientifico || "");
+      if (sortKey === "imp_asc") return avgImpact(a) - avgImpact(b);
+      if (sortKey === "imp_desc") return avgImpact(b) - avgImpact(a);
+      return 0;
+    });
 
   // Estilos
   const BTN = { fontFamily: "'Inter','Segoe UI',sans-serif", fontSize: "0.74rem", fontWeight: 600, padding: "8px 16px", borderRadius: 5, cursor: "pointer", border: "1px solid", display: "inline-flex", alignItems: "center", gap: 5, transition: "all .12s" };
@@ -135,6 +152,16 @@ export default function App() {
                 </FV>
               </div>
             )}
+            <div style={{ marginBottom: 16 }}>{SL("Condición Oficial (Sinavimo)")}
+              <FV>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontFamily: "monospace", fontSize: "0.75rem", color: f.condicion_sinavimo && f.condicion_sinavimo !== "Desconocida" ? P.navy : P.txt3, fontWeight: f.condicion_sinavimo && f.condicion_sinavimo !== "Desconocida" ? 600 : 400 }}>
+                    {f.condicion_sinavimo || "Desconocida"}
+                  </span>
+                  <a href="https://www.sinavimo.gov.ar" target="_blank" rel="noopener noreferrer" style={{ fontFamily: "monospace", fontSize: "0.6rem", color: P.blue, textDecoration: "none", border: `1px solid ${P.border2}`, borderRadius: 3, padding: "1px 6px" }}>↗ SINAVIMO</a>
+                </div>
+              </FV>
+            </div>
             {f.descripcion_biologica && <FLD label="Descripción Biológica">{f.descripcion_biologica}</FLD>}
             {f.signos_sintomas && <FLD label="Signos, Síntomas y Daños">{f.signos_sintomas}</FLD>}
             {f.condiciones_predisponentes && <FLD label="Condiciones Predisponentes">{f.condiciones_predisponentes}</FLD>}
@@ -200,6 +227,7 @@ export default function App() {
                 ))}
               </div>
             </div>
+            <div style={{ marginBottom: 12 }}>{SL("Condición Oficial (Sinavimo)")}<input style={IN} value={edit.condicion_sinavimo || ""} onChange={e => upd("condicion_sinavimo", e.target.value)} placeholder="Ej: Plaga Cuarentenaria Ausente / Plaga No Cuarentenaria Presente / Desconocida" /></div>
             {[["descripcion_biologica", "Descripción Biológica", 1000, 5], ["signos_sintomas", "Signos, Síntomas y Daños", 500, 3], ["condiciones_predisponentes", "Condiciones Predisponentes", 500, 3]].map(([k, lbl, max, rows]) => (
               <div key={k} style={{ marginBottom: 12 }}>
                 {SL(`${lbl} (máx ${max})`)}<textarea style={TA} rows={rows} value={edit[k] || ""} onChange={e => upd(k, e.target.value.slice(0, max))} /><CC k={k} max={max} />
@@ -330,18 +358,67 @@ export default function App() {
             </div>
           ) : (
             <>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
                 <div>
                   <div style={{ fontFamily: "Georgia,serif", fontSize: "1.1rem", color: P.navy, fontWeight: 600 }}>Fichas registradas</div>
                   <div style={{ fontSize: "0.72rem", color: P.txt3, marginTop: 1 }}>Sistema Nacional de Vigilancia · FitoFichas</div>
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <span style={{ fontFamily: "monospace", fontSize: "0.65rem", color: P.txt2, background: P.blueL, border: `1px solid ${P.border}`, padding: "3px 10px", borderRadius: 20, fontWeight: 600 }}>{fichas.length} {fichas.length === 1 ? "ficha" : "fichas"}</span>
+                  <span style={{ fontFamily: "monospace", fontSize: "0.65rem", color: P.txt2, background: P.blueL, border: `1px solid ${P.border}`, padding: "3px 10px", borderRadius: 20, fontWeight: 600 }}>{fichasFiltradas.length}/{fichas.length} {fichas.length === 1 ? "ficha" : "fichas"}</span>
                   <button style={{ ...BSM, ...BP }} onClick={() => setTab("nueva")}>➕ Nueva</button>
                 </div>
               </div>
+
+              {/* Filtros */}
+              <div style={{ background: P.bgW, border: `1px solid ${P.border}`, borderRadius: 8, padding: "12px 14px", marginBottom: 18 }}>
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontFamily: "monospace", fontSize: "0.58rem", color: P.blue, textTransform: "uppercase", letterSpacing: ".09em", marginBottom: 7 }}>Tipo de plaga</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    <button onClick={() => setFilterTipo(null)} style={{ fontFamily: "monospace", fontSize: "0.62rem", fontWeight: 600, padding: "3px 11px", borderRadius: 20, cursor: "pointer", border: `1px solid ${!filterTipo ? P.blue : P.border2}`, background: !filterTipo ? P.blue : "transparent", color: !filterTipo ? "#fff" : P.txt2, transition: "all .12s" }}>Todos</button>
+                    {[...types].sort().map(t => {
+                      const tb = tipoBg(t);
+                      const active = filterTipo === t;
+                      return <button key={t} onClick={() => setFilterTipo(active ? null : t)} style={{ fontFamily: "monospace", fontSize: "0.62rem", fontWeight: 600, padding: "3px 11px", borderRadius: 20, cursor: "pointer", border: `1px solid ${active ? tb.color : P.border2}`, background: active ? tb.color : "transparent", color: active ? "#fff" : P.txt2, transition: "all .12s" }}>{t}</button>;
+                    })}
+                  </div>
+                </div>
+                <div style={{ borderTop: `1px solid ${P.border}`, paddingTop: 10 }}>
+                  <div style={{ fontFamily: "monospace", fontSize: "0.58rem", color: P.blue, textTransform: "uppercase", letterSpacing: ".09em", marginBottom: 7 }}>Condición Sinavimo</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    <button onClick={() => setFilterSinavimo(null)} style={{ fontFamily: "monospace", fontSize: "0.62rem", fontWeight: 600, padding: "3px 11px", borderRadius: 20, cursor: "pointer", border: `1px solid ${!filterSinavimo ? P.blue : P.border2}`, background: !filterSinavimo ? P.blue : "transparent", color: !filterSinavimo ? "#fff" : P.txt2, transition: "all .12s" }}>Todas</button>
+                    {[...sinavimoVals].sort().map(s => {
+                      const active = filterSinavimo === s;
+                      const isC = s.includes("Cuarentenaria");
+                      const isP = s.includes("Presente");
+                      const color = s === "Desconocida" ? P.txt3 : isC && isP ? P.red : isC ? "#d97706" : isP ? P.accent : P.txt2;
+                      return <button key={s} onClick={() => setFilterSinavimo(active ? null : s)} style={{ fontFamily: "monospace", fontSize: "0.62rem", fontWeight: 600, padding: "3px 11px", borderRadius: 20, cursor: "pointer", border: `1px solid ${active ? color : P.border2}`, background: active ? color : "transparent", color: active ? "#fff" : P.txt2, transition: "all .12s" }}>{s}</button>;
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Ordenamiento */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+                <span style={{ fontFamily: "monospace", fontSize: "0.58rem", color: P.txt3, textTransform: "uppercase", letterSpacing: ".09em" }}>Ordenar por</span>
+                {[
+                  ["alpha_asc",  "A → Z"],
+                  ["alpha_desc", "Z → A"],
+                  ["imp_desc",   "Impacto ARG ↓"],
+                  ["imp_asc",    "Impacto ARG ↑"],
+                ].map(([key, lbl]) => (
+                  <button key={key} onClick={() => setSortKey(key)} style={{ fontFamily: "monospace", fontSize: "0.62rem", fontWeight: 600, padding: "3px 12px", borderRadius: 20, cursor: "pointer", border: `1px solid ${sortKey === key ? P.navy : P.border2}`, background: sortKey === key ? P.navy : "transparent", color: sortKey === key ? "#fff" : P.txt2, transition: "all .12s" }}>{lbl}</button>
+                ))}
+              </div>
+
+              {fichasFiltradas.length === 0 && (
+                <div style={{ textAlign: "center", padding: "40px 20px", color: P.txt3, fontFamily: "monospace", fontSize: "0.78rem" }}>
+                  Sin fichas para los filtros seleccionados.
+                  <button onClick={() => { setFilterTipo(null); setFilterSinavimo(null); }} style={{ display: "block", margin: "10px auto 0", ...BS, fontSize: "0.7rem" }}>Limpiar filtros</button>
+                </div>
+              )}
+
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(290px,1fr))", gap: 14, paddingBottom: 44 }}>
-                {fichas.map((f, i) => {
+                {fichasFiltradas.map((f, i) => {
                   const imp = f.impacto_comercial;
                   const overall = imp ? Math.round((IMPACT_CATS.reduce((s, c) => s + (imp[c.key] || 0), 0) / IMPACT_CATS.length) * 10) / 10 : null;
                   const oc = overall !== null ? impColor(overall) : null;
