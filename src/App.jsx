@@ -6,6 +6,10 @@ import { parseJSON } from "./utils/parseJSON";
 import WorldMap from "./components/WorldMap";
 import ImpactChart from "./components/ImpactChart";
 import { FICHAS_DEFAULT } from "./data/fichasDefault";
+import ArticulosBuscador from "./components/ArticulosBuscador";
+import DBConfig from "./components/DBConfig";
+import { sbReady } from "./lib/supabase";
+import { dbLoadFichas, dbUpsertFicha, dbDeleteFicha } from "./services/db";
 
 // ═══ APP ══════════════════════════════════════════════════════════════════════
 export default function App() {
@@ -20,24 +24,44 @@ export default function App() {
   const [filterTipo, setFilterTipo] = useState(null);
   const [filterSinavimo, setFilterSinavimo] = useState(null);
   const [sortKey, setSortKey] = useState("alpha_asc");
+  const [dbOpen, setDbOpen] = useState(false);
 
   useEffect(() => {
+    // 1. Cargar desde localStorage inmediatamente
+    let initial = FICHAS_DEFAULT;
     try {
       const s = localStorage.getItem("ffd");
       if (s) {
         const stored = JSON.parse(s);
-        // Merge: keep default fichas that the user hasn't deleted
         const storedIds = new Set(stored.map(f => f.id));
         const defaults = FICHAS_DEFAULT.filter(f => !storedIds.has(f.id));
-        setFichas([...stored, ...defaults]);
-      } else {
-        setFichas(FICHAS_DEFAULT);
+        initial = [...stored, ...defaults];
       }
-    } catch {
-      setFichas(FICHAS_DEFAULT);
+    } catch {}
+    setFichas(initial);
+
+    // 2. Cargar desde Supabase en segundo plano (si está configurado)
+    if (sbReady()) {
+      dbLoadFichas()
+        .then(remote => {
+          const remoteIds = new Set(remote.map(f => String(f.id)));
+          const extras = FICHAS_DEFAULT.filter(f => !remoteIds.has(String(f.id)));
+          const merged = [...remote, ...extras];
+          setFichas(merged);
+          try { localStorage.setItem("ffd", JSON.stringify(remote)); } catch {}
+        })
+        .catch(() => {}); // silencioso: localStorage ya está cargado
     }
   }, []);
-  const persist = arr => { setFichas(arr); try { localStorage.setItem("ffd", JSON.stringify(arr)); } catch {} };
+
+  const persist = (arr, changed = null, deletedId = null) => {
+    setFichas(arr);
+    try { localStorage.setItem("ffd", JSON.stringify(arr)); } catch {}
+    if (sbReady()) {
+      if (changed)   dbUpsertFicha(changed).catch(() => {});
+      if (deletedId) dbDeleteFicha(deletedId).catch(() => {});
+    }
+  };
 
   const loadJSON = () => {
     setJsonErr(""); setOk(false);
@@ -45,17 +69,17 @@ export default function App() {
       const ficha = parseJSON(jsonTxt);
       ficha.id = Date.now().toString();
       ficha.createdAt = new Date().toISOString();
-      persist([ficha, ...fichas.filter(f => f.nombre_cientifico !== ficha.nombre_cientifico)]);
+      persist([ficha, ...fichas.filter(f => f.nombre_cientifico !== ficha.nombre_cientifico)], ficha);
       setOk(true);
       setTimeout(() => { setJsonTxt(""); setOk(false); setTab("fichas"); setView(ficha.id); }, 800);
     } catch (e) { setJsonErr(e.message); }
   };
 
   const get = id => fichas.find(f => f.id === id);
-  const doDelete = id => { persist(fichas.filter(f => f.id !== id)); setDel(null); setView(null); };
+  const doDelete = id => { persist(fichas.filter(f => f.id !== id), null, id); setDel(null); setView(null); };
   const doSave = () => {
     const idx = fichas.findIndex(f => f.id === edit.id); if (idx === -1) return;
-    const arr = [...fichas]; arr[idx] = edit; persist(arr); setView(edit.id); setEdit(null);
+    const arr = [...fichas]; arr[idx] = edit; persist(arr, edit); setView(edit.id); setEdit(null);
   };
   const upd = (k, v) => setEdit(p => ({ ...p, [k]: v }));
   const updT = (k, v) => setEdit(p => ({ ...p, taxonomia: { ...p.taxonomia, [k]: v } }));
@@ -285,17 +309,27 @@ export default function App() {
               <div style={{ fontFamily: "monospace", fontSize: "0.54rem", color: "#aac4e0", letterSpacing: ".06em" }}>Sistema Nacional de Fichas Fitosanitarias</div>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             {[["Fichas", fichas.length], ["Tipos", types.size]].map(([l, n]) => (
               <div key={l} style={{ textAlign: "center" }}>
                 <div style={{ fontFamily: "monospace", fontSize: "1.3rem", color: "#fff", fontWeight: 600, display: "block" }}>{n}</div>
                 <div style={{ fontSize: "0.58rem", color: "#7090b0", textTransform: "uppercase", letterSpacing: ".07em" }}>{l}</div>
               </div>
             ))}
+            <button onClick={() => setDbOpen(true)} title="Base de datos en la nube" style={{
+              background: sbReady() ? "rgba(29,158,117,.25)" : "rgba(255,255,255,.08)",
+              border: `1px solid ${sbReady() ? "rgba(29,158,117,.5)" : "rgba(255,255,255,.15)"}`,
+              color: sbReady() ? "#7de8c8" : "#7090b0",
+              borderRadius: 6, cursor: "pointer", padding: "6px 12px",
+              fontFamily: "monospace", fontSize: "0.62rem", fontWeight: 600,
+              display: "flex", alignItems: "center", gap: 5, transition: "all .15s",
+            }}>
+              {sbReady() ? "🟢" : "☁"} {sbReady() ? "BD Conectada" : "Conectar BD"}
+            </button>
           </div>
         </div>
         <div style={{ background: P.navy2, display: "flex", paddingLeft: 24 }}>
-          {[["fichas", "📋 Mis Fichas"], ["nueva", "➕ Nueva Ficha"]].map(([key, lbl]) => (
+          {[["fichas", "📋 Mis Fichas"], ["nueva", "➕ Nueva Ficha"], ["articulos", "🔍 Artículos"]].map(([key, lbl]) => (
             <button key={key} onClick={() => setTab(key)} style={{ fontFamily: "inherit", fontSize: "0.75rem", fontWeight: 600, padding: "10px 18px", border: "none", borderBottom: `3px solid ${tab === key ? "#fff" : "transparent"}`, background: "transparent", color: tab === key ? "#fff" : "#7090b0", cursor: "pointer", transition: "all .12s" }}>{lbl}</button>
           ))}
         </div>
@@ -465,11 +499,13 @@ export default function App() {
             </>
           )
         )}
+        {tab === "articulos" && <ArticulosBuscador />}
       </div>
 
       {view && !edit && <ViewModal />}
       {edit && <EditModal />}
       {del && <DelDialog />}
+      {dbOpen && <DBConfig onClose={() => setDbOpen(false)} fichas={fichas} />}
     </div>
   );
 }
