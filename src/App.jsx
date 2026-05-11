@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Component } from "react";
 import { TIPOS, IMPACT_CATS, P } from "./constants";
 import { impColor } from "./utils/impColor";
 import { exportPDF } from "./utils/exportPDF";
@@ -7,12 +7,36 @@ import WorldMap from "./components/WorldMap";
 import ImpactChart from "./components/ImpactChart";
 import { FICHAS_DEFAULT } from "./data/fichasDefault";
 import ArticulosBuscador from "./components/ArticulosBuscador";
+import PlagaMap from "./components/PlagaMap";
+import EquiposManager from "./components/EquiposManager";
+import RolesManager from "./components/RolesManager";
 import DBConfig from "./components/DBConfig";
-import { sbReady } from "./lib/supabase";
-import { dbLoadFichas, dbUpsertFicha, dbDeleteFicha } from "./services/db";
+import LoginPage from "./components/LoginPage";
+import { sbReady, sbClient, sbSignOut, toDisplay } from "./lib/supabase";
+import { dbLoadFichas, dbUpsertFicha, dbDeleteFicha, dbUpsertPerfil, dbGetPerfilRol } from "./services/db";
+
+class ModalErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(e) { return { error: e }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ position:"fixed",inset:0,background:"rgba(7,25,58,.75)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:16 }}>
+          <div style={{ background:"#fff",borderRadius:10,padding:24,maxWidth:500,width:"100%" }}>
+            <div style={{ color:"#a32d2d",fontWeight:700,marginBottom:8 }}>Error al mostrar la ficha</div>
+            <pre style={{ fontSize:"0.72rem",color:"#333",whiteSpace:"pre-wrap",wordBreak:"break-word",marginBottom:16,maxHeight:200,overflow:"auto",background:"#f5f5f5",padding:8,borderRadius:4 }}>{this.state.error?.message}{"\n"}{this.state.error?.stack}</pre>
+            <button onClick={this.props.onClose} style={{ background:"#185fa5",color:"#fff",border:"none",borderRadius:5,padding:"8px 18px",cursor:"pointer",fontWeight:600 }}>Cerrar</button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // ═══ APP ══════════════════════════════════════════════════════════════════════
 export default function App() {
+  const [authUser, setAuthUser] = useState(() => sessionStorage.getItem("ff_auth") || null);
   const [fichas, setFichas] = useState([]);
   const [tab, setTab] = useState("fichas");
   const [jsonTxt, setJsonTxt] = useState("");
@@ -25,9 +49,42 @@ export default function App() {
   const [filterSinavimo, setFilterSinavimo] = useState(null);
   const [sortKey, setSortKey] = useState("alpha_asc");
   const [dbOpen, setDbOpen] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authRole, setAuthRole] = useState('user');
 
+  // ── Auth: verifica sesión Supabase al arrancar ────────────────────────────
   useEffect(() => {
-    // 1. Cargar desde localStorage inmediatamente
+    const sb = sbClient();
+    if (!sb) { setAuthChecked(true); return; }
+
+    sb.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        const u = toDisplay(session.user.email);
+        setAuthUser(u);
+        if (sbReady()) {
+          dbUpsertPerfil(u).catch(() => {});
+          dbGetPerfilRol(u).then(setAuthRole).catch(() => {});
+        }
+      }
+      setAuthChecked(true);
+    });
+
+    const { data: { subscription } } = sb.auth.onAuthStateChange((_ev, session) => {
+      if (session?.user) {
+        const u = toDisplay(session.user.email);
+        setAuthUser(u);
+        if (sbReady()) dbGetPerfilRol(u).then(setAuthRole).catch(() => {});
+      } else {
+        setAuthUser(null);
+        setAuthRole('user');
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // ── Fichas: carga solo cuando el usuario está autenticado ─────────────────
+  useEffect(() => {
+    if (!authUser) return;
     let initial = FICHAS_DEFAULT;
     try {
       const s = localStorage.getItem("ffd");
@@ -40,19 +97,29 @@ export default function App() {
     } catch {}
     setFichas(initial);
 
-    // 2. Cargar desde Supabase en segundo plano (si está configurado)
     if (sbReady()) {
       dbLoadFichas()
         .then(remote => {
           const remoteIds = new Set(remote.map(f => String(f.id)));
           const extras = FICHAS_DEFAULT.filter(f => !remoteIds.has(String(f.id)));
-          const merged = [...remote, ...extras];
-          setFichas(merged);
+          setFichas([...remote, ...extras]);
           try { localStorage.setItem("ffd", JSON.stringify(remote)); } catch {}
         })
-        .catch(() => {}); // silencioso: localStorage ya está cargado
+        .catch(() => {});
     }
-  }, []);
+  }, [authUser]);
+
+  // Pantalla de carga mientras se verifica la sesión
+  if (!authChecked) return (
+    <div style={{ minHeight:"100vh", background:P.navy3, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:16 }}>
+      <div style={{ width:40, height:40, border:"3px solid rgba(255,255,255,.15)", borderTopColor:P.blue, borderRadius:"50%", animation:"spin .8s linear infinite" }} />
+      <div style={{ fontFamily:"monospace", fontSize:"0.65rem", color:"#7090b0", textTransform:"uppercase", letterSpacing:".1em" }}>Verificando sesión…</div>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
+
+  // Guard: si no hay sesión activa, mostrar login
+  if (!authUser) return <LoginPage onLogin={u => setAuthUser(u)} />;
 
   const persist = (arr, changed = null, deletedId = null) => {
     setFichas(arr);
@@ -135,6 +202,59 @@ export default function App() {
     const taxa = f.taxonomia || {};
     const tb = tipoBg(f.tipoplaga);
     const presCount = (f.presencia_mundial || []).filter(p => p.estado === "presente").length;
+
+    // Normalizar fuentes: soporta tanto strings como objetos
+    const fuentesNorm = (f.fuentes || []).map((src, i) =>
+      typeof src === "string"
+        ? { id: i + 1, referencia: src, url: null, tipo: null }
+        : { id: src.id ?? i + 1, referencia: src.referencia || "", url: src.url || null, tipo: src.tipo || null }
+    );
+
+    const TIPO_BADGE = {
+      base_datos: { bg: P.blueL,   color: P.blue,   lbl: "Base de datos" },
+      articulo:   { bg: P.accentL, color: P.accent,  lbl: "Artículo"      },
+      informe:    { bg: P.goldL,   color: P.gold,    lbl: "Informe"       },
+      libro:      { bg: "#f0eaf8", color: "#6b3fa0", lbl: "Libro"         },
+    };
+
+    // Badge numérico clicable que lleva a la URL de la fuente
+    const RefBadge = ({ id }) => {
+      const src = fuentesNorm.find(s => s.id === id);
+      if (!src) return null;
+      const tc = TIPO_BADGE[src.tipo] || { bg: P.bg, color: P.txt3 };
+      const Tag = src.url ? "a" : "span";
+      return (
+        <Tag href={src.url || undefined} target={src.url ? "_blank" : undefined}
+          rel="noopener noreferrer" title={src.referencia}
+          style={{
+            background: tc.bg, color: tc.color, border: `1px solid ${tc.color}50`,
+            borderRadius: 3, fontSize: "0.58rem", fontFamily: "monospace",
+            padding: "1px 5px", fontWeight: 700, textDecoration: "none",
+            cursor: src.url ? "pointer" : "default", display: "inline-block",
+          }}>
+          {id}
+        </Tag>
+      );
+    };
+
+    // Encabezado de sección con badges de referencias opcionales
+    const SLR = (lbl, refs) => (
+      <div style={{ fontFamily: "monospace", fontSize: "0.6rem", color: P.blue, textTransform: "uppercase", letterSpacing: ".09em", display: "flex", alignItems: "center", gap: 7, marginBottom: 5 }}>
+        {lbl}
+        {Array.isArray(refs) && refs.length > 0 && (
+          <span style={{ display: "inline-flex", gap: 3, flexShrink: 0 }}>
+            {refs.map(id => <RefBadge key={id} id={id} />)}
+          </span>
+        )}
+        <div style={{ flex: 1, height: 1, background: P.border }} />
+      </div>
+    );
+
+    // Campo con label+refs y contenido
+    const FLDR = (lbl, refs, children) => (
+      <div style={{ marginBottom: 16 }}>{SLR(lbl, refs)}<FV>{children}</FV></div>
+    );
+
     return (
       <div style={OV} onClick={e => e.target === e.currentTarget && setView(null)}>
         <div style={MOD}>
@@ -153,7 +273,7 @@ export default function App() {
             <CloseBtn onClick={() => setView(null)} />
           </div>
           <div style={{ background: P.navy2, padding: "8px 20px", display: "flex", gap: 20, borderBottom: `1px solid ${P.blue}40` }}>
-            {[["Orden", taxa.orden || "—"], ["Familia", taxa.familia || "—"], ["Presencia", presCount ? presCount + " países" : "—"], ["Fuentes", (f.fuentes?.length || 0) + " ref."]].map(([k, v]) => (
+            {[["Orden", taxa.orden || "—"], ["Familia", taxa.familia || "—"], ["Presencia", presCount ? presCount + " países" : "—"], ["Fuentes", fuentesNorm.length + " ref."]].map(([k, v]) => (
               <div key={k}>
                 <div style={{ fontFamily: "monospace", fontSize: "0.55rem", color: "#7090b0", textTransform: "uppercase", letterSpacing: ".08em" }}>{k}</div>
                 <div style={{ fontSize: "0.78rem", color: "#aac4e0", fontStyle: k === "Familia" ? "italic" : "normal" }}>{v}</div>
@@ -176,7 +296,7 @@ export default function App() {
                 </FV>
               </div>
             )}
-            <div style={{ marginBottom: 16 }}>{SL("Condición Oficial (Sinavimo)")}
+            <div style={{ marginBottom: 16 }}>{SLR("Condición Oficial (Sinavimo)", f.condicion_sinavimo_refs)}
               <FV>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <span style={{ fontFamily: "monospace", fontSize: "0.75rem", color: f.condicion_sinavimo && f.condicion_sinavimo !== "Desconocida" ? P.navy : P.txt3, fontWeight: f.condicion_sinavimo && f.condicion_sinavimo !== "Desconocida" ? 600 : 400 }}>
@@ -186,31 +306,59 @@ export default function App() {
                 </div>
               </FV>
             </div>
-            {f.descripcion_biologica && <FLD label="Descripción Biológica">{f.descripcion_biologica}</FLD>}
-            {f.signos_sintomas && <FLD label="Signos, Síntomas y Daños">{f.signos_sintomas}</FLD>}
-            {f.condiciones_predisponentes && <FLD label="Condiciones Predisponentes">{f.condiciones_predisponentes}</FLD>}
+            {f.descripcion_biologica && FLDR("Descripción Biológica", f.descripcion_biologica_refs, f.descripcion_biologica)}
+            {f.signos_sintomas && FLDR("Signos, Síntomas y Daños", f.signos_sintomas_refs, f.signos_sintomas)}
+            {f.condiciones_predisponentes && FLDR("Condiciones Predisponentes", f.condiciones_predisponentes_refs, f.condiciones_predisponentes)}
             {f.presencia_mundial?.length > 0 && (
               <div style={{ marginBottom: 16 }}>
-                {SL(`Distribución Mundial · ${presCount} países con presencia confirmada`)}
+                {SLR(`Distribución Mundial · ${presCount} países con presencia confirmada`, f.presencia_mundial_refs)}
                 <WorldMap presencia={f.presencia_mundial} />
               </div>
             )}
-            {f.impacto_comercial && <div style={{ marginBottom: 16 }}>{SL("Impacto Comercial para Argentina")}<ImpactChart impacto={f.impacto_comercial} /></div>}
-            {f.fuentes?.length > 0 && (
-              <FLD label="Fuentes de Información">
-                {f.fuentes.map((s, i) => (
-                  <div key={i} style={{ display: "flex", gap: 8, fontSize: "0.76rem", color: P.txt2, marginBottom: 5, lineHeight: 1.4, padding: "4px 0", borderBottom: `1px solid ${P.border}` }}>
-                    <span style={{ fontFamily: "monospace", color: P.blue, fontSize: "0.66rem", flexShrink: 0, fontWeight: 700 }}>[{i + 1}]</span>
-                    <span>{s}</span>
-                  </div>
-                ))}
-              </FLD>
+            {f.impacto_comercial && (
+              <div style={{ marginBottom: 16 }}>
+                {SLR("Impacto Comercial para Argentina", f.impacto_comercial_refs)}
+                <ImpactChart impacto={f.impacto_comercial} />
+              </div>
+            )}
+            {fuentesNorm.length > 0 && (
+              <div style={{ marginBottom: 16 }}>{SL("Fuentes de Información")}
+                <FV>
+                  {fuentesNorm.map(src => {
+                    const tc = TIPO_BADGE[src.tipo];
+                    return (
+                      <div key={src.id} style={{ display: "flex", gap: 10, marginBottom: 8, lineHeight: 1.5, padding: "6px 0", borderBottom: `1px solid ${P.border}`, alignItems: "flex-start" }}>
+                        <span style={{ fontFamily: "monospace", color: P.blue, fontSize: "0.66rem", fontWeight: 700, flexShrink: 0, marginTop: 2 }}>[{src.id}]</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          {src.url
+                            ? <a href={src.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: "0.76rem", color: P.blue, textDecoration: "none", lineHeight: 1.5, wordBreak: "break-word" }}
+                                onMouseEnter={e => e.currentTarget.style.textDecoration = "underline"}
+                                onMouseLeave={e => e.currentTarget.style.textDecoration = "none"}>
+                                {src.referencia} ↗
+                              </a>
+                            : <span style={{ fontSize: "0.76rem", color: P.txt2 }}>{src.referencia}</span>
+                          }
+                          {tc && (
+                            <span style={{ display: "inline-block", marginLeft: 8, background: tc.bg, color: tc.color, fontFamily: "monospace", fontSize: "0.55rem", padding: "1px 6px", borderRadius: 3, border: `1px solid ${tc.color}40`, fontWeight: 600, verticalAlign: "middle" }}>
+                              {tc.lbl}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </FV>
+              </div>
             )}
           </div>
           <div style={MACT}>
-            <button style={BP} onClick={() => exportPDF(f)}>⬇ Exportar PDF</button>
-            <button style={BW} onClick={() => { setEdit({ ...f, taxonomia: { ...taxa } }); setView(null); }}>✏️ Editar ficha</button>
-            <button style={BD} onClick={() => setDel(f.id)}>🗑 Eliminar</button>
+            <button style={BP} onClick={() => {
+              const svgEl = document.querySelector(".fitofichas-worldmap-svg");
+              const svgStr = svgEl ? new XMLSerializer().serializeToString(svgEl) : "";
+              exportPDF(f, svgStr);
+            }}>⬇ Exportar PDF</button>
+            {authRole === 'admin' && <button style={BW} onClick={() => { setEdit({ ...f, taxonomia: { ...taxa } }); setView(null); }}>✏️ Editar ficha</button>}
+            {authRole === 'admin' && <button style={BD} onClick={() => setDel(f.id)}>🗑 Eliminar</button>}
           </div>
         </div>
       </div>
@@ -269,7 +417,23 @@ export default function App() {
                 <div style={{ marginTop: 8 }}>{SL("Descripción del impacto")}<textarea style={TA} rows={2} value={(edit.impacto_comercial || {}).descripcion || ""} onChange={e => upd("impacto_comercial", { ...edit.impacto_comercial, descripcion: e.target.value.slice(0, 250) })} /></div>
               </div>
             </div>
-            <div>{SL("Fuentes (una por línea)")}<textarea style={TA} rows={4} value={(edit.fuentes || []).join("\n")} onChange={e => upd("fuentes", e.target.value.split("\n"))} /></div>
+            <div>
+              {SL("Fuentes (una por línea)")}
+              <textarea style={TA} rows={4}
+                value={(edit.fuentes || []).map(f => typeof f === "string" ? f : f.referencia || "").join("\n")}
+                onChange={e => {
+                  const lines = e.target.value.split("\n");
+                  upd("fuentes", lines.map((line, i) => {
+                    const orig = (edit.fuentes || [])[i];
+                    return (orig && typeof orig === "object") ? { ...orig, referencia: line } : line;
+                  }));
+                }} />
+              {(edit.fuentes || []).some(f => typeof f === "object" && f.url) && (
+                <div style={{ fontFamily: "monospace", fontSize: "0.6rem", color: P.txt3, marginTop: 4 }}>
+                  ℹ Las URLs y tipos de cada fuente se conservan al editar el texto.
+                </div>
+              )}
+            </div>
           </div>
           <div style={MACT}><button style={BP} onClick={doSave}>💾 Guardar cambios</button><button style={BS} onClick={() => { setView(edit.id); setEdit(null); }}>Cancelar</button></div>
         </div>
@@ -326,10 +490,21 @@ export default function App() {
             }}>
               {sbReady() ? "🟢" : "☁"} {sbReady() ? "BD Conectada" : "Conectar BD"}
             </button>
+            <div style={{ width:1, height:28, background:"rgba(255,255,255,.12)" }} />
+            <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:1 }}>
+              <div style={{ fontFamily:"monospace", fontSize:"0.55rem", color:"#7090b0", textTransform:"uppercase", letterSpacing:".07em" }}>usuario</div>
+              <div style={{ fontFamily:"monospace", fontSize:"0.68rem", color:"#aac4e0", fontWeight:600 }}>{authUser}</div>
+            </div>
+            <button onClick={() => { sbSignOut(); setAuthUser(null); }} title="Cerrar sesión" style={{
+              background:"rgba(163,45,45,.2)", border:"1px solid rgba(163,45,45,.4)",
+              color:"#f0a0a0", borderRadius:6, cursor:"pointer", padding:"6px 11px",
+              fontFamily:"monospace", fontSize:"0.6rem", fontWeight:600,
+              display:"flex", alignItems:"center", gap:4, transition:"all .15s",
+            }}>⏻ Salir</button>
           </div>
         </div>
         <div style={{ background: P.navy2, display: "flex", paddingLeft: 24 }}>
-          {[["fichas", "📋 Mis Fichas"], ["nueva", "➕ Nueva Ficha"], ["articulos", "🔍 Artículos"]].map(([key, lbl]) => (
+          {[["fichas", "📋 Fichas"], ["articulos", "🔍 Artículos"], ["plagamap", "🌍 PlagaMap"], ["equipos", "👥 Equipos"], ...(authRole === 'admin' ? [["roles", "👤 Roles"]] : [])].map(([key, lbl]) => (
             <button key={key} onClick={() => setTab(key)} style={{ fontFamily: "inherit", fontSize: "0.75rem", fontWeight: 600, padding: "10px 18px", border: "none", borderBottom: `3px solid ${tab === key ? "#fff" : "transparent"}`, background: "transparent", color: tab === key ? "#fff" : "#7090b0", cursor: "pointer", transition: "all .12s" }}>{lbl}</button>
           ))}
         </div>
@@ -337,7 +512,7 @@ export default function App() {
 
       <div style={{ maxWidth: 1040, margin: "0 auto", padding: "24px 20px" }}>
 
-        {tab === "nueva" && (
+        {tab === "nueva" && authRole === 'admin' && (
           <div style={{ maxWidth: 680, margin: "0 auto" }}>
             <div style={{ background: P.bgW, border: `1px solid ${P.border}`, borderRadius: 10, overflow: "hidden", boxShadow: "0 2px 12px rgba(7,25,58,.08)" }}>
               <div style={{ background: P.blueL, borderBottom: `1px solid ${P.border}`, padding: "12px 18px", display: "flex", alignItems: "center", gap: 10 }}>
@@ -388,7 +563,7 @@ export default function App() {
                 Escriba en el chat: <code style={{ background: P.blueL, color: P.blue, padding: "2px 8px", borderRadius: 4, fontFamily: "monospace" }}>ficha Botrytis cinerea</code>
               </div>
               <div style={{ fontSize: "0.78rem", color: P.txt3, marginBottom: 24 }}>Luego pegue la respuesta en <strong style={{ color: P.navy }}>➕ Nueva Ficha</strong></div>
-              <button style={BP} onClick={() => setTab("nueva")}>➕ Nueva Ficha</button>
+              {authRole === 'admin' && <button style={BP} onClick={() => setTab("nueva")}>➕ Nueva Ficha</button>}
             </div>
           ) : (
             <>
@@ -399,7 +574,7 @@ export default function App() {
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <span style={{ fontFamily: "monospace", fontSize: "0.65rem", color: P.txt2, background: P.blueL, border: `1px solid ${P.border}`, padding: "3px 10px", borderRadius: 20, fontWeight: 600 }}>{fichasFiltradas.length}/{fichas.length} {fichas.length === 1 ? "ficha" : "fichas"}</span>
-                  <button style={{ ...BSM, ...BP }} onClick={() => setTab("nueva")}>➕ Nueva</button>
+                  {authRole === 'admin' && <button style={{ ...BSM, ...BP }} onClick={() => setTab("nueva")}>➕ Nueva</button>}
                 </div>
               </div>
 
@@ -488,9 +663,9 @@ export default function App() {
                       </div>
                       <div style={{ padding: "9px 14px", borderTop: `1px solid ${P.border}`, background: P.bg, display: "flex", gap: 5, flexWrap: "wrap" }}>
                         <button style={{ ...BSM, background: P.blue, borderColor: P.blue, color: "#fff", fontSize: "0.65rem", padding: "4px 10px" }} onClick={() => setView(f.id)}>👁 Ver ficha</button>
-                        <button style={{ ...BSM, ...BW, fontSize: "0.65rem", padding: "4px 10px" }} onClick={() => setEdit({ ...f, taxonomia: { ...f.taxonomia } })}>✏️ Editar</button>
+                        {authRole === 'admin' && <button style={{ ...BSM, ...BW, fontSize: "0.65rem", padding: "4px 10px" }} onClick={() => setEdit({ ...f, taxonomia: { ...f.taxonomia } })}>✏️ Editar</button>}
                         <button style={{ ...BSM, background: P.accentL, borderColor: "#9fe1cb", color: "#0f6e56", fontSize: "0.65rem", padding: "4px 10px" }} onClick={() => exportPDF(f)}>⬇ PDF</button>
-                        <button style={{ ...BSM, ...BD, fontSize: "0.65rem", padding: "4px 10px" }} onClick={() => setDel(f.id)}>🗑</button>
+                        {authRole === 'admin' && <button style={{ ...BSM, ...BD, fontSize: "0.65rem", padding: "4px 10px" }} onClick={() => setDel(f.id)}>🗑</button>}
                       </div>
                     </div>
                   );
@@ -499,10 +674,15 @@ export default function App() {
             </>
           )
         )}
-        {tab === "articulos" && <ArticulosBuscador />}
+        {tab === "articulos" && <ArticulosBuscador authUser={authUser} />}
+        {tab === "plagamap"  && <PlagaMap />}
+        {tab === "equipos"   && <EquiposManager   authUser={authUser} authRole={authRole} />}
+        {tab === "roles" && authRole === 'admin' && <RolesManager authUser={authUser} />}
       </div>
 
-      {view && !edit && <ViewModal />}
+      <ModalErrorBoundary onClose={() => setView(null)}>
+        {view && !edit && <ViewModal />}
+      </ModalErrorBoundary>
       {edit && <EditModal />}
       {del && <DelDialog />}
       {dbOpen && <DBConfig onClose={() => setDbOpen(false)} fichas={fichas} />}

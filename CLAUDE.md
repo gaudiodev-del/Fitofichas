@@ -15,7 +15,9 @@ Cuando el usuario escriba `ficha [nombre de la plaga]` o pida generar una ficha,
 - `condicion_sinavimo` debe obtenerse exclusivamente de sinavimo.gov.ar. Si la especie no figura en ese sitio, poner exactamente `"Desconocida"`. No inferir ni inventar la condición.
 - Los valores de `impacto_comercial` son enteros del 0 al 10.
 - Las descripciones (`descripcion_biologica`, `signos_sintomas`, `condiciones_predisponentes`) deben ser técnicas, detalladas y basadas en fuentes reconocidas (CABI, EPPO, SINAVIMO, INTA, FAO).
-- `fuentes` debe tener al menos 3 referencias bibliográficas reales.
+- `fuentes` debe tener al menos 3 referencias bibliográficas reales, en formato objeto con `id`, `referencia`, `url` y `tipo`.
+- `tipo` en fuentes debe ser exactamente uno de: `base_datos` · `articulo` · `informe` · `libro`
+- Cada sección de contenido debe tener su campo `_refs` con los IDs de las fuentes que la respaldan. Campos: `descripcion_biologica_refs`, `signos_sintomas_refs`, `condiciones_predisponentes_refs`, `presencia_mundial_refs`, `impacto_comercial_refs`, `condicion_sinavimo_refs` (este último solo si hay fuente verificada).
 
 ### Formato JSON
 
@@ -49,10 +51,15 @@ Cuando el usuario escriba `ficha [nombre de la plaga]` o pida generar una ficha,
     "impacto_exportaciones": 0,
     "descripcion": "Párrafo breve sobre el impacto económico concreto para Argentina."
   },
+  "descripcion_biologica_refs": [1, 2],
+  "signos_sintomas_refs": [1, 3],
+  "condiciones_predisponentes_refs": [2, 3],
+  "presencia_mundial_refs": [1, 2],
+  "impacto_comercial_refs": [2, 3],
   "fuentes": [
-    "CABI Compendium (año). Nombre especie. https://...",
-    "EPPO Global Database (año). Código EPPO. https://...",
-    "Fuente adicional"
+    { "id": 1, "referencia": "CABI Compendium (año). Nombre especie. CABI International.", "url": "https://doi.org/...", "tipo": "base_datos" },
+    { "id": 2, "referencia": "EPPO Global Database (año). Código EPPO.", "url": "https://gd.eppo.int/taxon/...", "tipo": "base_datos" },
+    { "id": 3, "referencia": "Apellido, A. (año). Título del artículo. Revista, vol(n), pp.", "url": "https://doi.org/...", "tipo": "articulo" }
   ]
 }
 ```

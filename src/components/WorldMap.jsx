@@ -73,7 +73,7 @@ export default function WorldMap({presencia}) {
 
   return (
     <div ref={ref} style={{ background: "#d0e4f0", border: `1px solid ${P.border}`, borderRadius: 8, overflow: "hidden", userSelect: "none", position: "relative" }}>
-      <svg viewBox="0 0 1000 507" style={{ width: "100%", display: "block" }}>
+      <svg viewBox="0 0 1000 507" style={{ width: "100%", display: "block" }} className="fitofichas-worldmap-svg">
         {/* Océano */}
         <rect width={1000} height={507} fill="#b8d0e8" />
 
@@ -129,12 +129,12 @@ export default function WorldMap({presencia}) {
         })}
 
         {/* Leyenda */}
-        <rect x={6} y={410} width={194} height={92} rx={4} fill="rgba(255,255,255,.94)" stroke="#a8c4d8" strokeWidth={0.8} />
-        <text x={14} y={424} fill={P.navy} fontSize={7.5} fontFamily="monospace" fontWeight="bold">LEYENDA</text>
+        <rect x={4} y={386} width={262} height={121} rx={4} fill="rgba(255,255,255,.94)" stroke="#a8c4d8" strokeWidth={0.8} />
+        <text x={14} y={403} fill={P.navy} fontSize={13} fontFamily="monospace" fontWeight="bold">LEYENDA</text>
         {Object.entries(MAP_COLORS).map(([k, { fill, label }], i) => (
-          <g key={k} transform={`translate(11,${430 + i * 14})`}>
-            <circle cx={5} cy={5} r={5} fill={fill} stroke="#fff" strokeWidth={1} />
-            <text x={14} y={9.5} fill={P.navy} fontSize={8} fontFamily="monospace">{label}</text>
+          <g key={k} transform={`translate(11,${412 + i * 23})`}>
+            <circle cx={7} cy={7} r={7} fill={fill} stroke="#fff" strokeWidth={1} />
+            <text x={20} y={11.5} fill={P.navy} fontSize={14} fontFamily="monospace">{label}</text>
           </g>
         ))}
       </svg>
