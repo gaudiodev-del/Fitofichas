@@ -2,74 +2,52 @@ import { useState, useEffect, useRef } from "react";
 import { NUM2, CTRD, P } from "../constants";
 
 const W = 1000, H = 507;
-const API = "https://api.openalex.org";
+const API    = "https://api.openalex.org";
 const MAILTO = "gaudio.dev@gmail.com";
 
 const proj = ([lon, lat]) => [
   ((lon + 180) / 360) * W,
-  ((90 - lat) / 180) * H,
+  ((90 - lat)  / 180) * H,
 ];
 
-function choroplethColor(count) {
-  if (!count) return { fill: "#dde8cc", stroke: "#c0ceb0" };
-  if (count <= 2)   return { fill: "#b7e4c7", stroke: "#74c69d" };
-  if (count <= 10)  return { fill: "#52b788", stroke: "#40916c" };
-  if (count <= 30)  return { fill: "#f4a261", stroke: "#e76f51" };
-  if (count <= 100) return { fill: "#e76f51", stroke: "#c1440e" };
-  return { fill: "#9e2a2b", stroke: "#7b1d1d" };
-}
-
-function rebuildAbstract(inv) {
-  if (!inv || typeof inv !== "object") return "";
-  const pos = {};
-  Object.entries(inv).forEach(([w, ps]) => ps.forEach(p => { pos[p] = w; }));
-  return Object.keys(pos).sort((a, b) => +a - +b).map(k => pos[k]).join(" ").slice(0, 300);
-}
-
-const LEGEND_ITEMS = [
-  ["Sin datos", "#dde8cc"],
-  ["1–2 artículos", "#b7e4c7"],
-  ["3–10 artículos", "#52b788"],
-  ["11–30 artículos", "#f4a261"],
-  ["31–100 artículos", "#e76f51"],
-  ["100+ artículos", "#9e2a2b"],
+// Paleta de colores distinguibles para cada plaga
+const PALETTE = [
+  "#e63946","#2196F3","#4CAF50","#FF9800","#9C27B0",
+  "#00BCD4","#FF5722","#8BC34A","#E91E63","#795548",
+  "#607D8B","#F44336","#3F51B5","#009688","#FFC107",
 ];
+
+let _id = 0;
+const uid = () => ++_id;
 
 export default function PlagaMap() {
   const svgRef = useRef();
 
   // Geometría del mapa
-  const [paths, setPaths] = useState(null);
-  const [tt, setTt] = useState(null);
+  const [paths, setPaths]   = useState(null);
+  const [tt,    setTt]      = useState(null);
 
-  // Búsqueda
-  const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [countryData, setCountryData] = useState({});
-  const [totalPapers, setTotalPapers] = useState(0);
-  const [searchedPest, setSearchedPest] = useState("");
+  // Lista de plagas: [{id, name, color, visible, loading, countries:{iso2:count}, total}]
+  const [pests,  setPests]  = useState([]);
+  const [query,  setQuery]  = useState("");
 
-  // Panel de artículos
-  const [selectedCountry, setSelectedCountry] = useState(null);
-  const [papers, setPapers] = useState([]);
-  const [papersLoading, setPapersLoading] = useState(false);
-  const [papersTotal, setPapersTotal] = useState(0);
-  const [papersPage, setPapersPage] = useState(1);
+  // País seleccionado → artículos
+  const [selCountry,  setSelCountry]  = useState(null); // {iso2, name}
+  const [selPestId,   setSelPestId]   = useState(null);
+  const [papers,      setPapers]      = useState([]);
+  const [papersLoad,  setPapersLoad]  = useState(false);
 
-  // Cargar geometría TopoJSON (reutiliza el script si ya está cargado)
+  // ── Cargar geometría TopoJSON ─────────────────────────────────────────
   useEffect(() => {
-    const loadScript = src => new Promise((resolve, reject) => {
-      if (window.topojson) { resolve(); return; }
-      const existing = document.querySelector(`script[data-id="topojson"]`);
-      if (existing) { existing.addEventListener("load", resolve); return; }
+    const loadScript = src => new Promise((res, rej) => {
+      if (window.topojson) { res(); return; }
+      const ex = document.querySelector(`script[data-id="topojson"]`);
+      if (ex) { ex.addEventListener("load", res); return; }
       const s = document.createElement("script");
-      s.src = src;
-      s.setAttribute("data-id", "topojson");
-      s.onload = resolve;
-      s.onerror = reject;
+      s.src = src; s.setAttribute("data-id","topojson");
+      s.onload = res; s.onerror = rej;
       document.head.appendChild(s);
     });
-
     let cancelled = false;
     loadScript("https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js")
       .then(() => fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json"))
@@ -77,408 +55,329 @@ export default function PlagaMap() {
       .then(topo => {
         if (cancelled) return;
         const features = window.topojson.feature(topo, topo.objects.countries).features;
-        const result = features.map(feat => {
+        setPaths(features.map(feat => {
           const iso2 = NUM2[parseInt(feat.id)] || null;
           let d = "";
           const geom = feat.geometry;
           if (!geom) return { iso2, d };
           const polys = geom.type === "Polygon" ? [geom.coordinates]
             : geom.type === "MultiPolygon" ? geom.coordinates : [];
-          polys.forEach(poly => {
-            poly.forEach(ring => {
-              if (!ring.length) return;
-              const [x0, y0] = proj(ring[0]);
-              d += `M${x0.toFixed(1)},${y0.toFixed(1)}`;
-              let prevX = x0;
-              for (let i = 1; i < ring.length; i++) {
-                const [x, y] = proj(ring[i]);
-                if (Math.abs(x - prevX) > 500) {
-                  d += `M${x.toFixed(1)},${y.toFixed(1)}`;
-                } else {
-                  d += `L${x.toFixed(1)},${y.toFixed(1)}`;
-                }
-                prevX = x;
-              }
-              d += "Z";
-            });
-          });
+          polys.forEach(poly => poly.forEach(ring => {
+            if (!ring.length) return;
+            const [x0, y0] = proj(ring[0]);
+            d += `M${x0.toFixed(1)},${y0.toFixed(1)}`;
+            let px = x0;
+            for (let i = 1; i < ring.length; i++) {
+              const [x, y] = proj(ring[i]);
+              d += Math.abs(x - px) > 500
+                ? `M${x.toFixed(1)},${y.toFixed(1)}`
+                : `L${x.toFixed(1)},${y.toFixed(1)}`;
+              px = x;
+            }
+            d += "Z";
+          }));
           return { iso2, d };
-        });
-        setPaths(result);
+        }));
       })
       .catch(() => setPaths([]));
     return () => { cancelled = true; };
   }, []);
 
-  // ── Búsqueda por especie ────────────────────────────────────────────────
-  const doSearch = async e => {
-    e.preventDefault();
-    const pest = query.trim();
-    if (!pest) return;
-    setLoading(true);
-    setCountryData({});
-    setSelectedCountry(null);
-    setPapers([]);
-    setSearchedPest(pest);
+  // ── Agregar plaga ─────────────────────────────────────────────────────
+  const addPest = async () => {
+    const name = query.trim();
+    if (!name) return;
+    if (pests.some(p => p.name.toLowerCase() === name.toLowerCase())) {
+      setQuery(""); return;
+    }
+    const id    = uid();
+    const color = PALETTE[pests.length % PALETTE.length];
+    setQuery("");
+    setPests(prev => [...prev, { id, name, color, visible: true, loading: true, countries: {}, total: 0 }]);
 
     try {
-      const url = `${API}/works?search=${encodeURIComponent(pest)}&group_by=institutions.country_code&per_page=200&mailto=${MAILTO}`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setTotalPapers(data.meta?.count || 0);
-      const cd = {};
+      const url = `${API}/works?search=${encodeURIComponent(name)}&group_by=institutions.country_code&per_page=200&mailto=${MAILTO}`;
+      const data = await fetch(url).then(r => r.json());
+      const countries = {};
       (data.group_by || []).forEach(({ key, count }) => {
-        if (key && key !== "unknown") cd[key.toUpperCase()] = count;
+        if (key && key !== "unknown") countries[key.toUpperCase()] = count;
       });
-      setCountryData(cd);
-    } catch (err) {
-      console.error("PlagaMap search error:", err);
-    } finally {
-      setLoading(false);
+      setPests(prev => prev.map(p =>
+        p.id === id ? { ...p, loading: false, countries, total: data.meta?.count || 0 } : p
+      ));
+    } catch {
+      setPests(prev => prev.map(p => p.id === id ? { ...p, loading: false } : p));
     }
   };
 
-  // ── Selección de país ───────────────────────────────────────────────────
-  const selectCountry = async (iso2, name, count) => {
-    if (!searchedPest || !count) return;
-    setSelectedCountry({ iso2, name, count });
+  const togglePest = id =>
+    setPests(prev => prev.map(p => p.id === id ? { ...p, visible: !p.visible } : p));
+
+  const removePest = id => {
+    setPests(prev => prev.filter(p => p.id !== id));
+    if (selPestId === id) { setSelPestId(null); setPapers([]); setSelCountry(null); }
+  };
+
+  // ── Cargar artículos de un país para una plaga ────────────────────────
+  const loadPapers = async (pest, iso2, countryName) => {
+    setSelCountry({ iso2, name: countryName });
+    setSelPestId(pest.id);
     setPapers([]);
-    setPapersPage(1);
-    setPapersTotal(count);
-    setPapersLoading(true);
-
+    setPapersLoad(true);
     try {
-      const fields = "id,title,doi,publication_year,authorships,primary_location,abstract_inverted_index,open_access";
-      const url = `${API}/works?search=${encodeURIComponent(searchedPest)}&filter=institutions.country_code:${iso2.toLowerCase()}&per_page=8&page=1&select=${fields}&mailto=${MAILTO}`;
-      const res = await fetch(url);
-      const data = await res.json();
+      const fields = "id,title,doi,publication_year,authorships,primary_location,open_access";
+      const url = `${API}/works?search=${encodeURIComponent(pest.name)}&filter=institutions.country_code:${iso2.toLowerCase()}&per_page=6&select=${fields}&mailto=${MAILTO}`;
+      const data = await fetch(url).then(r => r.json());
       setPapers(data.results || []);
-      setPapersTotal(data.meta?.count || count);
-    } catch (err) {
-      console.error("PlagaMap papers error:", err);
-    } finally {
-      setPapersLoading(false);
-    }
+    } catch { setPapers([]); }
+    finally { setPapersLoad(false); }
   };
 
-  // ── Cargar más artículos ────────────────────────────────────────────────
-  const loadMore = async () => {
-    const nextPage = papersPage + 1;
-    setPapersPage(nextPage);
-    setPapersLoading(true);
-    try {
-      const fields = "id,title,doi,publication_year,authorships,primary_location,abstract_inverted_index,open_access";
-      const url = `${API}/works?search=${encodeURIComponent(searchedPest)}&filter=institutions.country_code:${selectedCountry.iso2.toLowerCase()}&per_page=8&page=${nextPage}&select=${fields}&mailto=${MAILTO}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      setPapers(prev => [...prev, ...(data.results || [])]);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setPapersLoading(false);
-    }
-  };
+  // ── Calcular dots por país ────────────────────────────────────────────
+  // dotsByCountry: {iso2: [{pest, count}]}
+  const dotsByCountry = {};
+  pests.filter(p => p.visible && !p.loading).forEach(pest => {
+    Object.entries(pest.countries).forEach(([iso2, count]) => {
+      if (!dotsByCountry[iso2]) dotsByCountry[iso2] = [];
+      dotsByCountry[iso2].push({ pest, count });
+    });
+  });
 
-  const countriesCount = Object.keys(countryData).length;
+  const hasPests   = pests.length > 0;
+  const activePests = pests.filter(p => p.visible && !p.loading);
 
-  // ── RENDER ──────────────────────────────────────────────────────────────
+  // ── Render ───────────────────────────────────────────────────────────
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: P.bg }}>
+    <div style={{ display:"flex", flexDirection:"column", height:"100%", background:P.bg }}>
 
-      {/* ── Barra de búsqueda ── */}
-      <div style={{
-        padding: "14px 24px", background: P.blueLL,
-        borderBottom: `1px solid ${P.border}`,
-        display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", flexShrink: 0,
-      }}>
-        <form onSubmit={doSearch} style={{ display: "flex", gap: 8, flex: 1, minWidth: 280 }}>
-          <input
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="Nombre científico de la plaga o maleza…  Ej: Sorghum halepense, Amaranthus palmeri"
-            style={{
-              flex: 1, padding: "9px 14px",
-              border: `1.5px solid ${P.border2}`, borderRadius: 7,
-              fontFamily: "inherit", fontSize: "0.85rem", outline: "none",
-              background: "#fff", color: P.txt,
-            }}
-          />
-          <button type="submit" disabled={loading} style={{
-            padding: "9px 22px", background: loading ? P.txt3 : P.blue,
-            color: "#fff", border: "none", borderRadius: 7,
-            fontWeight: 700, cursor: loading ? "not-allowed" : "pointer",
-            fontSize: "0.85rem", transition: "background .15s", flexShrink: 0,
-          }}>
-            {loading ? "Buscando…" : "🔍 Buscar"}
-          </button>
-        </form>
-
-        {searchedPest && !loading && (
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <span style={{
-              background: P.blueL, border: `1px solid ${P.border2}`, borderRadius: 20,
-              padding: "3px 13px", fontFamily: "monospace", fontSize: "0.68rem",
-              color: P.navy, fontWeight: 700,
-            }}>
-              {totalPapers.toLocaleString("es-AR")} artículos
-            </span>
-            <span style={{
-              background: P.accentL, border: `1px solid ${P.accent}40`, borderRadius: 20,
-              padding: "3px 13px", fontFamily: "monospace", fontSize: "0.68rem",
-              color: P.accent, fontWeight: 700,
-            }}>
-              {countriesCount} países
-            </span>
-          </div>
-        )}
+      {/* Barra de búsqueda */}
+      <div style={{ padding:"12px 20px", background:P.blueLL, borderBottom:`1px solid ${P.border}`, display:"flex", gap:10, alignItems:"center", flexShrink:0 }}>
+        <input
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && addPest()}
+          placeholder="Nombre científico de la plaga…  Ej: Sorghum halepense, Amaranthus palmeri"
+          style={{ flex:1, maxWidth:540, padding:"8px 14px", border:`1.5px solid ${P.border2}`, borderRadius:7, fontFamily:"inherit", fontSize:"0.84rem", outline:"none", background:"#fff", color:P.txt }}
+        />
+        <button onClick={addPest} style={{ padding:"8px 22px", background:P.blue, color:"#fff", border:"none", borderRadius:7, fontWeight:700, cursor:"pointer", fontSize:"0.84rem", flexShrink:0 }}>
+          + Agregar plaga
+        </button>
+        <span style={{ fontFamily:"monospace", fontSize:"0.67rem", color:P.txt3 }}>
+          {pests.length === 0
+            ? "Agregá plagas para superponer su distribución en el mapa"
+            : `${pests.length} plaga${pests.length!==1?"s":""} · ${activePests.length} visible${activePests.length!==1?"s":""}`}
+        </span>
       </div>
 
-      {/* ── Mapa + Panel ── */}
-      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+      {/* Mapa + Panel */}
+      <div style={{ flex:1, display:"flex", overflow:"hidden" }}>
 
         {/* ── Mapa SVG ── */}
-        <div ref={svgRef} style={{ flex: 1, background: "#d0e4f0", position: "relative", overflow: "hidden" }}>
-          <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "100%", display: "block" }}>
+        <div ref={svgRef} style={{ flex:1, background:"#d0e4f0", position:"relative", overflow:"hidden" }}>
+          <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", height:"100%", display:"block" }}>
             <rect width={W} height={H} fill="#b8d0e8" />
 
             {paths === null && (
-              <text x={500} y={260} textAnchor="middle" fill="#3a6080" fontSize={13} fontFamily="monospace">
-                Cargando mapa…
-              </text>
+              <text x={500} y={260} textAnchor="middle" fill="#3a6080" fontSize={13} fontFamily="monospace">Cargando mapa…</text>
             )}
 
-            {/* Países */}
+            {/* Países base */}
             {paths && paths.map((c, i) => {
-              const count = countryData[c.iso2] || 0;
-              const hasPapers = count > 0 && !!searchedPest;
-              const isSelected = selectedCountry?.iso2 === c.iso2;
-              const { fill, stroke } = choroplethColor(count);
-              const name = CTRD[c.iso2]?.n || c.iso2 || "—";
+              const hasData = !!dotsByCountry[c.iso2];
               return c.d ? (
                 <path key={i} d={c.d}
-                  fill={isSelected ? "#1d6a9e" : fill}
-                  stroke={isSelected ? "#0a2550" : stroke}
-                  strokeWidth={hasPapers ? 0.7 : 0.4}
-                  opacity={hasPapers ? 0.92 : searchedPest ? 0.45 : 0.78}
-                  style={{ cursor: hasPapers ? "pointer" : "default", transition: "opacity .2s, fill .2s" }}
-                  onMouseMove={e => {
-                    if (!svgRef.current) return;
-                    const r = svgRef.current.getBoundingClientRect();
-                    setTt({ x: e.clientX - r.left, y: e.clientY - r.top, name, count });
-                  }}
-                  onMouseLeave={() => setTt(null)}
-                  onClick={() => hasPapers && selectCountry(c.iso2, name, count)}
+                  fill={hasData ? "#c5daf0" : "#dde8cc"}
+                  stroke={hasData ? "#8fb8d8" : "#c0ceb0"}
+                  strokeWidth={hasData ? 0.6 : 0.4}
+                  opacity={hasPests ? (hasData ? 0.92 : 0.4) : 0.78}
                 />
               ) : null;
             })}
 
-            {/* Puntos sobre países con artículos */}
-            {paths && searchedPest && Object.entries(countryData).map(([iso2, count]) => {
+            {/* Dots agrupados por país */}
+            {Object.entries(dotsByCountry).map(([iso2, pestList]) => {
               const c = CTRD[iso2];
               if (!c) return null;
               const [cx, cy] = proj([c.lon, c.lat]);
-              const { fill } = choroplethColor(count);
-              const isSelected = selectedCountry?.iso2 === iso2;
+              const n       = pestList.length;
+              const spacing = 12;
+              const startX  = cx - ((n - 1) * spacing) / 2;
+              const isSel   = selCountry?.iso2 === iso2;
+
               return (
-                <g key={iso2} style={{ cursor: "pointer" }}
-                  onClick={() => selectCountry(iso2, c.n, count)}
+                <g key={iso2} style={{ cursor:"pointer" }}
                   onMouseMove={e => {
                     if (!svgRef.current) return;
                     const r = svgRef.current.getBoundingClientRect();
-                    setTt({ x: e.clientX - r.left, y: e.clientY - r.top, name: c.n, count });
+                    setTt({ x:e.clientX-r.left, y:e.clientY-r.top, name:c.n, pestList });
                   }}
-                  onMouseLeave={() => setTt(null)}>
-                  {isSelected && <circle cx={cx} cy={cy} r={13} fill="none" stroke="#fff" strokeWidth={3} />}
-                  {isSelected && <circle cx={cx} cy={cy} r={13} fill="none" stroke={fill} strokeWidth={2} />}
-                  <circle cx={cx} cy={cy} r={isSelected ? 7 : 5}
-                    fill={fill} stroke="#fff" strokeWidth={isSelected ? 2.5 : 1.5} />
+                  onMouseLeave={() => setTt(null)}
+                  onClick={() => pestList[0] && loadPapers(pestList[0].pest, iso2, c.n)}
+                >
+                  {/* Anillo de selección */}
+                  {isSel && <circle cx={cx} cy={cy} r={n*6+9} fill="none" stroke="#fff" strokeWidth={3} opacity={0.6} />}
+
+                  {/* Un dot por plaga, en fila horizontal centrada */}
+                  {pestList.map(({ pest }, idx) => (
+                    <circle key={pest.id}
+                      cx={startX + idx * spacing} cy={cy} r={5.5}
+                      fill={pest.color} stroke="#fff" strokeWidth={1.5}
+                    />
+                  ))}
                 </g>
               );
             })}
 
-            {/* Leyenda */}
-            {searchedPest && (
-              <g>
-                <rect x={4} y={H - 144} width={196} height={142} rx={4}
-                  fill="rgba(255,255,255,.94)" stroke="#a8c4d8" strokeWidth={0.8} />
-                <text x={14} y={H - 126} fill={P.navy} fontSize={10} fontFamily="monospace" fontWeight="bold">
-                  ARTÍCULOS POR PAÍS
-                </text>
-                {LEGEND_ITEMS.map(([label, color], i) => (
-                  <g key={label} transform={`translate(11,${H - 119 + i * 19})`}>
-                    <rect x={0} y={0} width={12} height={12} rx={2} fill={color} />
-                    <text x={18} y={10} fill={P.navy} fontSize={10} fontFamily="monospace">{label}</text>
-                  </g>
-                ))}
-              </g>
-            )}
+            {/* Leyenda de plagas activas */}
+            {activePests.length > 0 && (() => {
+              const rows  = activePests.length;
+              const boxH  = rows * 18 + 26;
+              const boxY  = H - boxH - 4;
+              return (
+                <g>
+                  <rect x={4} y={boxY} width={224} height={boxH} rx={4} fill="rgba(255,255,255,.94)" stroke="#a8c4d8" strokeWidth={0.8} />
+                  <text x={14} y={boxY+14} fill={P.navy} fontSize={9} fontFamily="monospace" fontWeight="bold">PLAGAS VISIBLES</text>
+                  {activePests.map((pest, i) => (
+                    <g key={pest.id} transform={`translate(11,${boxY+20+i*18})`}>
+                      <circle cx={6} cy={6} r={5.5} fill={pest.color} stroke="#fff" strokeWidth={1}/>
+                      <text x={18} y={10} fill={P.navy} fontSize={9} fontFamily="monospace">
+                        {pest.name.length > 23 ? pest.name.slice(0,23)+"…" : pest.name}
+                      </text>
+                    </g>
+                  ))}
+                </g>
+              );
+            })()}
 
             {/* Mensaje inicial */}
-            {!searchedPest && paths && (
-              <text x={500} y={H / 2 + 6} textAnchor="middle" fill="#3a6080" fontSize={13} fontFamily="monospace">
-                Ingresá el nombre científico de una plaga para visualizar su distribución
+            {!hasPests && paths && (
+              <text x={500} y={H/2} textAnchor="middle" fill="#3a6080" fontSize={13} fontFamily="monospace">
+                Agregá una plaga para visualizar su distribución en artículos científicos
               </text>
             )}
           </svg>
 
-          {/* Tooltip */}
+          {/* Tooltip hover */}
           {tt && (
-            <div style={{
-              position: "absolute",
-              left: Math.min(tt.x + 14, (svgRef.current?.offsetWidth || 700) - 230),
-              top: Math.max(tt.y - 52, 4),
-              background: "#fff",
-              border: `2px solid ${choroplethColor(tt.count).fill}`,
-              borderRadius: 6, padding: "5px 13px",
-              fontFamily: "monospace", fontSize: "0.7rem", color: P.navy,
-              pointerEvents: "none", whiteSpace: "nowrap",
-              boxShadow: "0 2px 10px rgba(7,25,58,.2)", zIndex: 20,
-            }}>
-              <strong>{tt.name}</strong><br />
-              <span style={{ color: choroplethColor(tt.count).fill }}>
-                {tt.count
-                  ? `${tt.count.toLocaleString("es-AR")} artículo${tt.count !== 1 ? "s" : ""}`
-                  : "Sin datos"}
-              </span>
+            <div style={{ position:"absolute", left:Math.min(tt.x+14,(svgRef.current?.offsetWidth||700)-250), top:Math.max(tt.y-64,4), background:"#fff", border:`1.5px solid ${P.border2}`, borderRadius:7, padding:"8px 13px", fontFamily:"monospace", fontSize:"0.68rem", color:P.navy, pointerEvents:"none", boxShadow:"0 2px 12px rgba(7,25,58,.18)", zIndex:20, minWidth:160 }}>
+              <div style={{ fontWeight:700, marginBottom:5, fontSize:"0.74rem", borderBottom:`1px solid ${P.border}`, paddingBottom:4 }}>{tt.name}</div>
+              {tt.pestList.map(({ pest, count }) => (
+                <div key={pest.id} style={{ display:"flex", alignItems:"center", gap:6, marginBottom:3 }}>
+                  <div style={{ width:9, height:9, borderRadius:"50%", background:pest.color, flexShrink:0 }}/>
+                  <span style={{ color:P.txt2, flex:1 }}>{pest.name.length>20?pest.name.slice(0,20)+"…":pest.name}</span>
+                  <span style={{ color:pest.color, fontWeight:700 }}>{count}</span>
+                </div>
+              ))}
+              <div style={{ fontSize:"0.6rem", color:P.txt3, marginTop:5 }}>Clic para ver artículos</div>
             </div>
           )}
         </div>
 
-        {/* ── Panel lateral de artículos ── */}
-        <div style={{
-          width: 360, flexShrink: 0, background: "#fff",
-          borderLeft: `1px solid ${P.border}`,
-          display: "flex", flexDirection: "column", overflow: "hidden",
-        }}>
-          {/* Header del panel */}
-          <div style={{
-            padding: "12px 16px", background: P.navy, color: "#fff", flexShrink: 0,
-          }}>
-            <div style={{ fontFamily: "monospace", fontSize: "0.75rem", fontWeight: 700 }}>
-              {selectedCountry ? `📄 ${selectedCountry.name}` : "📄 Artículos científicos"}
-            </div>
-            <div style={{ fontSize: "0.63rem", color: "rgba(255,255,255,.55)", marginTop: 3 }}>
-              {selectedCountry
-                ? `${selectedCountry.count.toLocaleString("es-AR")} artículo${selectedCountry.count !== 1 ? "s" : ""} · "${searchedPest}"`
-                : searchedPest
-                ? "Hacé clic en un país coloreado del mapa"
-                : "Buscá una especie para comenzar"}
-            </div>
+        {/* ── Panel lateral ── */}
+        <div style={{ width:310, flexShrink:0, background:"#fff", borderLeft:`1px solid ${P.border}`, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+
+          {/* Header */}
+          <div style={{ padding:"11px 16px", background:P.navy, color:"#fff", flexShrink:0 }}>
+            <div style={{ fontFamily:"monospace", fontSize:"0.74rem", fontWeight:700 }}>🌱 Plagas cargadas</div>
+            <div style={{ fontSize:"0.61rem", color:"rgba(255,255,255,.45)", marginTop:2 }}>Tildá o destildá para superponer en el mapa</div>
           </div>
 
-          {/* Lista de artículos */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "12px" }}>
+          {/* Lista de plagas */}
+          <div style={{ overflowY:"auto", padding:"10px", flexShrink:0, maxHeight: selCountry ? "46%" : "100%", borderBottom: selCountry ? `1px solid ${P.border}` : "none" }}>
+            {pests.length === 0 ? (
+              <div style={{ textAlign:"center", padding:"28px 12px", color:P.txt3, fontFamily:"monospace", fontSize:"0.69rem", lineHeight:1.8 }}>
+                <div style={{ fontSize:"1.8rem", opacity:.28, marginBottom:8 }}>🔬</div>
+                <div>Usá el buscador para agregar plagas y visualizar su distribución mundial en artículos científicos</div>
+              </div>
+            ) : (
+              pests.map(pest => (
+                <div key={pest.id} style={{ display:"flex", alignItems:"center", gap:7, padding:"8px 10px", marginBottom:6, background:pest.visible?P.blueLL:"#f7f7f7", border:`1.5px solid ${pest.visible?pest.color+"50":P.border}`, borderRadius:8, transition:"all .15s", opacity:pest.visible?1:0.52 }}>
 
-            {/* Estado vacío inicial */}
-            {!searchedPest && (
-              <PlaceholderMsg
-                icon="🌍"
-                title="Mapa de literatura científica"
-                body="Ingresá el nombre científico de una plaga o maleza. Los países se colorean según la cantidad de artículos publicados por investigadores de esa región."
-              />
-            )}
+                  <input type="checkbox" checked={pest.visible} onChange={() => togglePest(pest.id)}
+                    style={{ width:14, height:14, accentColor:pest.color, cursor:"pointer", flexShrink:0 }} />
 
-            {/* Instrucción post-búsqueda */}
-            {searchedPest && !selectedCountry && !loading && (
-              <PlaceholderMsg
-                icon="🖱️"
-                title="Seleccioná un país"
-                body="Hacé clic en cualquier país coloreado del mapa para ver los artículos científicos de esa región."
-              />
-            )}
+                  <div style={{ width:10, height:10, borderRadius:"50%", background:pest.color, flexShrink:0, boxShadow:`0 0 0 2px ${pest.color}30` }}/>
 
-            {/* Cargando artículos */}
-            {papersLoading && papers.length === 0 && (
-              <PlaceholderMsg icon="⏳" title="Cargando artículos…" body="" />
-            )}
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontFamily:"monospace", fontSize:"0.71rem", fontWeight:700, color:P.navy, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                      {pest.name}
+                    </div>
+                    <div style={{ fontFamily:"monospace", fontSize:"0.6rem", color:P.txt3, marginTop:1 }}>
+                      {pest.loading
+                        ? "Buscando…"
+                        : `${Object.keys(pest.countries).length} países · ${pest.total.toLocaleString("es-AR")} arts.`}
+                    </div>
+                  </div>
 
-            {/* Tarjetas de artículos */}
-            {papers.map((paper, i) => (
-              <PaperCard key={paper.id || i} paper={paper} />
-            ))}
+                  {pest.loading && (
+                    <div style={{ width:13, height:13, border:`2px solid ${P.border}`, borderTop:`2px solid ${pest.color}`, borderRadius:"50%", animation:"spin .7s linear infinite", flexShrink:0 }}/>
+                  )}
 
-            {/* Botón cargar más */}
-            {selectedCountry && papers.length > 0 && papers.length < papersTotal && (
-              <button
-                onClick={loadMore}
-                disabled={papersLoading}
-                style={{
-                  width: "100%", padding: "9px", marginTop: 6, borderRadius: 7,
-                  background: P.blueL, border: `1px solid ${P.border2}`,
-                  color: P.blue, fontWeight: 700, fontSize: "0.76rem",
-                  cursor: papersLoading ? "not-allowed" : "pointer",
-                  fontFamily: "inherit",
-                }}>
-                {papersLoading
-                  ? "Cargando…"
-                  : `Cargar más (${papers.length} de ${papersTotal.toLocaleString("es-AR")})`}
-              </button>
+                  {!pest.loading && (
+                    <button onClick={() => removePest(pest.id)}
+                      style={{ background:"none", border:"none", color:P.txt3, cursor:"pointer", fontSize:"1rem", padding:"0 2px", lineHeight:1, flexShrink:0, borderRadius:3 }}
+                      onMouseOver={e => e.currentTarget.style.color="#c0392b"}
+                      onMouseOut={e  => e.currentTarget.style.color=P.txt3}>×</button>
+                  )}
+                </div>
+              ))
             )}
           </div>
+
+          {/* Panel de artículos del país seleccionado */}
+          {selCountry && (
+            <>
+              {/* Sub-header con tabs por plaga */}
+              <div style={{ padding:"9px 14px", background:P.navy2, color:"#fff", flexShrink:0 }}>
+                <div style={{ fontFamily:"monospace", fontSize:"0.71rem", fontWeight:700, marginBottom:6 }}>
+                  📄 {selCountry.name}
+                </div>
+                <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+                  {pests.filter(p => p.visible && p.countries[selCountry.iso2]).map(pest => (
+                    <button key={pest.id}
+                      onClick={() => loadPapers(pest, selCountry.iso2, selCountry.name)}
+                      style={{ padding:"3px 8px", borderRadius:4, border:"none", cursor:"pointer", fontFamily:"monospace", fontSize:"0.6rem", fontWeight:700, transition:"all .15s", background: selPestId===pest.id ? pest.color : `${pest.color}30`, color: selPestId===pest.id ? "#fff" : pest.color }}>
+                      {pest.name.length>15?pest.name.slice(0,15)+"…":pest.name} ({pest.countries[selCountry.iso2]})
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Listado de artículos */}
+              <div style={{ flex:1, overflowY:"auto", padding:"10px" }}>
+                {papersLoad && (
+                  <div style={{ textAlign:"center", padding:"20px", color:P.txt3, fontFamily:"monospace", fontSize:"0.7rem" }}>Cargando artículos…</div>
+                )}
+                {!papersLoad && papers.length === 0 && selPestId && (
+                  <div style={{ textAlign:"center", padding:"20px", color:P.txt3, fontFamily:"monospace", fontSize:"0.7rem" }}>Sin resultados</div>
+                )}
+                {!papersLoad && papers.map((paper, i) => {
+                  const doi     = paper.doi?.replace("https://doi.org/","");
+                  const journal = paper.primary_location?.source?.display_name || "";
+                  const isOA    = paper.open_access?.is_oa;
+                  const auths   = (paper.authorships||[]).slice(0,2).map(a=>a.author?.display_name).filter(Boolean).join("; ");
+                  const extra   = (paper.authorships||[]).length > 2 ? ` +${paper.authorships.length-2}` : "";
+                  const selPest = pests.find(p => p.id === selPestId);
+                  return (
+                    <div key={paper.id||i} style={{ background:P.blueLL, border:`1px solid ${selPest?.color+"33"||P.border}`, borderRadius:7, padding:"9px 11px", marginBottom:7 }}>
+                      <div style={{ fontFamily:"monospace", fontSize:"0.6rem", color:P.txt3 }}>{paper.publication_year||"—"}</div>
+                      <div style={{ fontSize:"0.74rem", fontWeight:700, color:P.navy, lineHeight:1.35, marginBottom:4 }}>{paper.title||"Sin título"}</div>
+                      {journal && <div style={{ fontSize:"0.64rem", color:P.blue, fontStyle:"italic", marginBottom:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{journal}</div>}
+                      {auths && <div style={{ fontSize:"0.61rem", color:P.txt3, marginBottom:5 }}>{auths}{extra}</div>}
+                      <div style={{ display:"flex", gap:5 }}>
+                        {doi && <a href={`https://doi.org/${doi}`} target="_blank" rel="noopener noreferrer" style={{ fontSize:"0.6rem", padding:"2px 8px", borderRadius:4, background:P.blueL, color:P.blue, textDecoration:"none", fontWeight:700, border:`1px solid ${P.border2}` }}>↗ DOI</a>}
+                        {isOA && <span style={{ fontSize:"0.6rem", padding:"2px 8px", borderRadius:4, background:P.accentL, color:P.accent, fontWeight:700 }}>Acceso Abierto</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </div>
       </div>
-    </div>
-  );
-}
 
-// ── Sub-componentes ──────────────────────────────────────────────────────────
-
-function PlaceholderMsg({ icon, title, body }) {
-  return (
-    <div style={{ textAlign: "center", padding: "36px 20px", color: P.txt3, lineHeight: 1.8 }}>
-      <div style={{ fontSize: "2rem", marginBottom: 10, opacity: 0.35 }}>{icon}</div>
-      {title && <div style={{ fontWeight: 700, color: P.txt2, fontFamily: "monospace", fontSize: "0.75rem", marginBottom: 6 }}>{title}</div>}
-      {body && <div style={{ fontSize: "0.72rem", fontFamily: "monospace" }}>{body}</div>}
-    </div>
-  );
-}
-
-function PaperCard({ paper }) {
-  const title   = paper.title || "Sin título";
-  const year    = paper.publication_year || "—";
-  const doi     = paper.doi?.replace("https://doi.org/", "");
-  const journal = paper.primary_location?.source?.display_name || "";
-  const isOA    = paper.open_access?.is_oa;
-  const abstract = rebuildAbstract(paper.abstract_inverted_index);
-  const auths   = (paper.authorships || []).slice(0, 3).map(a => a.author?.display_name).filter(Boolean).join("; ");
-  const extra   = (paper.authorships || []).length > 3 ? ` +${paper.authorships.length - 3}` : "";
-
-  return (
-    <div style={{
-      background: P.blueLL, border: `1px solid ${P.border}`, borderRadius: 8,
-      padding: "11px 13px", marginBottom: 10,
-    }}>
-      <div style={{ fontFamily: "monospace", fontSize: "0.6rem", color: P.txt3, marginBottom: 3 }}>{year}</div>
-      <div style={{ fontSize: "0.78rem", fontWeight: 700, color: P.navy, lineHeight: 1.4, marginBottom: 5 }}>{title}</div>
-      {journal && (
-        <div style={{ fontSize: "0.67rem", color: P.blue, fontStyle: "italic", marginBottom: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {journal}
-        </div>
-      )}
-      {auths && (
-        <div style={{ fontSize: "0.63rem", color: P.txt3, marginBottom: 5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {auths}{extra}
-        </div>
-      )}
-      {abstract && (
-        <div style={{ fontSize: "0.67rem", color: P.txt2, lineHeight: 1.5, marginBottom: 7, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-          {abstract}
-        </div>
-      )}
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {doi && (
-          <a href={`https://doi.org/${doi}`} target="_blank" rel="noopener noreferrer"
-            style={{ fontSize: "0.62rem", padding: "3px 9px", borderRadius: 4, background: P.blueL, color: P.blue, textDecoration: "none", fontWeight: 700, border: `1px solid ${P.border2}` }}>
-            ↗ DOI
-          </a>
-        )}
-        {isOA && (
-          <span style={{ fontSize: "0.62rem", padding: "3px 9px", borderRadius: 4, background: P.accentL, color: P.accent, fontWeight: 700, border: `1px solid ${P.accent}40` }}>
-            Acceso Abierto
-          </span>
-        )}
-      </div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
