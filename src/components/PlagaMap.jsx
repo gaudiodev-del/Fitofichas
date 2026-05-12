@@ -112,6 +112,7 @@ export default function PlagaMap() {
     setPests(prev => prev.filter(p => p.id !== id));
     if (selPestId === id) { setSelPestId(null); setPapers([]); setSelCountry(null); }
   };
+  const clearSelection = () => { setSelCountry(null); setSelPestId(null); setPapers([]); };
 
   const loadPapers = async (pest, iso2, countryName) => {
     setSelCountry({ iso2, name: countryName });
@@ -155,7 +156,7 @@ export default function PlagaMap() {
         preserveAspectRatio="xMidYMid slice"
         style={{ position:"absolute", inset:0, width:"100%", height:"100%", display:"block" }}
       >
-        <rect width={W} height={H} fill="#b2d8e8" />
+        <rect width={W} height={H} fill="#b2d8e8" onClick={clearSelection} style={{ cursor:"default" }} />
 
         {paths === null && (
           <text x={500} y={260} textAnchor="middle"
@@ -168,7 +169,7 @@ export default function PlagaMap() {
           const hasData = !!dotsByCountry[country.iso2];
           return country.d ? (
             <path key={i} d={country.d}
-              fill={hasData ? "#1e3a8a" : "#4a7c59"}
+              fill={hasData ? "#1e3a8a" : "#7eb58a"}
               stroke={hasData ? "#3b82f6" : "#142418"}
               strokeWidth={hasData ? 0.6 : 0.25}
               opacity={hasPests ? (hasData ? 0.92 : 0.3) : 0.65}
@@ -192,7 +193,10 @@ export default function PlagaMap() {
                 setTt({ x:e.clientX-r.left, y:e.clientY-r.top, name:c.n, pestList });
               }}
               onMouseLeave={() => setTt(null)}
-              onClick={() => pestList[0] && loadPapers(pestList[0].pest, iso2, c.n)}
+              onClick={() => {
+                if (selCountry?.iso2 === iso2) { clearSelection(); return; }
+                pestList[0] && loadPapers(pestList[0].pest, iso2, c.n);
+              }}
             >
               {isSel && <circle cx={cx} cy={cy} r={n*7+13}
                 fill="none" stroke="#fff" strokeWidth={2} opacity={0.5} />}
@@ -387,8 +391,16 @@ export default function PlagaMap() {
         {selCountry ? (
           <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
             <div style={{ padding:"10px 14px", background:"#0f172a", flexShrink:0 }}>
-              <div style={{ fontSize:"0.72rem", fontWeight:700, color:"#fff", marginBottom:6 }}>
-                📄 {selCountry.name}
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
+                <div style={{ fontSize:"0.72rem", fontWeight:700, color:"#fff" }}>
+                  📄 {selCountry.name}
+                </div>
+                <button onClick={clearSelection} title="Cerrar" style={{
+                  background:"none", border:"none", color:"rgba(255,255,255,.5)",
+                  cursor:"pointer", fontSize:"1rem", lineHeight:1, padding:"0 2px",
+                }}
+                  onMouseOver={e => e.currentTarget.style.color="#fff"}
+                  onMouseOut={e  => e.currentTarget.style.color="rgba(255,255,255,.5)"}>×</button>
               </div>
               <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
                 {pests.filter(p => p.visible && p.countries[selCountry.iso2]).map(pest => (
