@@ -145,7 +145,7 @@ export default function PlagaMap() {
   return (
     <div ref={wrapRef} style={{
       position:"relative", width:"100%", height:"100%",
-      overflow:"hidden", background:"#0f1e35",
+      overflow:"hidden", background:"#b2d8e8",
       fontFamily:"'Inter',system-ui,sans-serif",
     }}>
 
@@ -155,7 +155,7 @@ export default function PlagaMap() {
         preserveAspectRatio="xMidYMid slice"
         style={{ position:"absolute", inset:0, width:"100%", height:"100%", display:"block" }}
       >
-        <rect width={W} height={H} fill="#0f1e35" />
+        <rect width={W} height={H} fill="#b2d8e8" />
 
         {paths === null && (
           <text x={500} y={260} textAnchor="middle"
@@ -168,7 +168,7 @@ export default function PlagaMap() {
           const hasData = !!dotsByCountry[country.iso2];
           return country.d ? (
             <path key={i} d={country.d}
-              fill={hasData ? "#1e3a8a" : "#1e3326"}
+              fill={hasData ? "#1e3a8a" : "#4a7c59"}
               stroke={hasData ? "#3b82f6" : "#142418"}
               strokeWidth={hasData ? 0.6 : 0.25}
               opacity={hasPests ? (hasData ? 0.92 : 0.3) : 0.65}
