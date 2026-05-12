@@ -101,7 +101,8 @@ export default function PlagaMap() {
       console.log(`[PlagaMap] "${name}" → group_by:`, data.group_by?.length, 'grupos', data.group_by?.slice(0,5));
       const countries = {};
       (data.group_by || []).forEach(({ key, count }) => {
-        if (key && key !== "unknown") countries[key.toUpperCase()] = count;
+        const k = (key || "").trim().toUpperCase();
+        if (k && k !== "UNKNOWN") countries[k] = count;
       });
       console.log(`[PlagaMap] "${name}" → países ISO2:`, Object.keys(countries));
       setPests(prev => prev.map(p =>
@@ -146,8 +147,13 @@ export default function PlagaMap() {
     });
   });
 
-  const hasPests   = pests.length > 0;
+  const hasPests    = pests.length > 0;
   const activePests = pests.filter(p => p.visible && !p.loading);
+
+  // Códigos sin posición en CTRD (para diagnóstico)
+  const missingCodes = [...new Set(
+    Object.keys(dotsByCountry).filter(iso2 => !CTRD[iso2])
+  )];
 
   // ── Render ───────────────────────────────────────────────────────────
   return (
@@ -341,6 +347,18 @@ export default function PlagaMap() {
               ))
             )}
           </div>
+
+          {/* Diagnóstico: códigos sin posición */}
+          {missingCodes.length > 0 && (
+            <div style={{ padding:"8px 12px", background:"#fff8e1", borderTop:`1px solid #ffe082`, flexShrink:0 }}>
+              <div style={{ fontFamily:"monospace", fontSize:"0.6rem", color:"#7a5800", fontWeight:700, marginBottom:3 }}>
+                Sin posición en mapa ({missingCodes.length}):
+              </div>
+              <div style={{ fontFamily:"monospace", fontSize:"0.59rem", color:"#9a6000", wordBreak:"break-all" }}>
+                {missingCodes.join(", ")}
+              </div>
+            </div>
+          )}
 
           {/* Panel de artículos del país seleccionado */}
           {selCountry && (

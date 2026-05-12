@@ -112,6 +112,28 @@ export const CTRD = {
   PG:{n:"Papúa Nueva Guinea",lat:-6.3,lon:143.9},WS:{n:"Samoa",lat:-13.8,lon:-172.1},
   SB:{n:"Islas Salomón",lat:-9.6,lon:160.2},TO:{n:"Tonga",lat:-21.2,lon:-175.2},
   TV:{n:"Tuvalu",lat:-7.5,lon:178.7},VU:{n:"Vanuatu",lat:-15.4,lon:166.9},
+  CK:{n:"Islas Cook",lat:-21.2,lon:-159.8},NC:{n:"Nueva Caledonia",lat:-20.9,lon:165.6},
+  PF:{n:"Polinesia Francesa",lat:-17.7,lon:-149.4},AS:{n:"Samoa Americana",lat:-14.3,lon:-170.0},
+  GU:{n:"Guam",lat:13.4,lon:144.8},MP:{n:"Islas Marianas",lat:15.1,lon:145.7},
+  NF:{n:"Norfolk",lat:-29.0,lon:167.9},NU:{n:"Niue",lat:-19.1,lon:-169.9},
+  // Territorios y dependencias con instituciones de investigación
+  PR:{n:"Puerto Rico",lat:18.2,lon:-66.6},VI:{n:"Islas Vírgenes EE.UU.",lat:18.3,lon:-64.9},
+  GP:{n:"Guadalupe",lat:16.2,lon:-61.5},MQ:{n:"Martinica",lat:14.6,lon:-61.0},
+  GF:{n:"Guayana Francesa",lat:4.0,lon:-53.0},RE:{n:"Reunión",lat:-21.1,lon:55.5},
+  YT:{n:"Mayotte",lat:-12.8,lon:45.2},PM:{n:"San Pedro y Miquelón",lat:46.9,lon:-56.3},
+  BL:{n:"San Bartolomé",lat:17.9,lon:-62.8},MF:{n:"San Martín",lat:18.1,lon:-63.1},
+  WF:{n:"Wallis y Futuna",lat:-13.3,lon:-176.2},
+  GL:{n:"Groenlandia",lat:72.0,lon:-40.9},FO:{n:"Islas Feroe",lat:61.9,lon:-6.9},
+  SJ:{n:"Svalbard",lat:77.9,lon:18.9},GI:{n:"Gibraltar",lat:36.1,lon:-5.4},
+  AD:{n:"Andorra",lat:42.5,lon:1.5},VA:{n:"Ciudad del Vaticano",lat:41.9,lon:12.5},
+  JE:{n:"Jersey",lat:49.2,lon:-2.1},GG:{n:"Guernsey",lat:49.5,lon:-2.6},IM:{n:"Isla de Man",lat:54.2,lon:-4.5},
+  FK:{n:"Islas Malvinas",lat:-51.8,lon:-59.5},KY:{n:"Islas Caimán",lat:19.3,lon:-81.4},
+  BM:{n:"Bermudas",lat:32.3,lon:-64.8},TC:{n:"Islas Turcas y Caicos",lat:21.7,lon:-71.8},
+  VG:{n:"Islas Vírgenes Brit.",lat:18.4,lon:-64.6},AI:{n:"Anguila",lat:18.2,lon:-63.1},
+  MS:{n:"Montserrat",lat:16.7,lon:-62.2},AW:{n:"Aruba",lat:12.5,lon:-70.0},
+  CW:{n:"Curazao",lat:12.2,lon:-69.0},SX:{n:"Sint Maarten",lat:18.0,lon:-63.1},
+  SH:{n:"Santa Elena",lat:-15.9,lon:-5.7},IO:{n:"Territorio Brit. Océano Índico",lat:-7.3,lon:72.4},
+  CC:{n:"Islas Cocos",lat:-12.2,lon:96.8},CX:{n:"Isla Christmas",lat:-10.5,lon:105.7},
 };
 
 export const MAP_COLORS = {
