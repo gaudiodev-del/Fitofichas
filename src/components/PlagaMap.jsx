@@ -101,8 +101,10 @@ export default function PlagaMap() {
       console.log(`[PlagaMap] "${name}" → group_by:`, data.group_by?.length, 'grupos', data.group_by?.slice(0,5));
       const countries = {};
       (data.group_by || []).forEach(({ key, count }) => {
-        const k = (key || "").trim().toUpperCase();
-        if (k && k !== "UNKNOWN") countries[k] = count;
+        if (!key) return;
+        // OpenAlex devuelve URLs completas: "https://openalex.org/countries/US"
+        const iso2 = key.replace(/^https?:\/\/openalex\.org\/countries\//i, "").trim().toUpperCase();
+        if (iso2 && iso2 !== "UNKNOWN" && iso2.length <= 3) countries[iso2] = count;
       });
       console.log(`[PlagaMap] "${name}" → países ISO2:`, Object.keys(countries));
       setPests(prev => prev.map(p =>
