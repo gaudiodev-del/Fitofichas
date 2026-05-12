@@ -294,33 +294,65 @@ export default function PlagaMap() {
           );
         })}
 
-        {/* Leyenda — fija, fuera del grupo de zoom */}
-        {activePests.length > 0 && (() => {
-          const boxH = activePests.length * 20 + 28;
-          const boxY = H - boxH - 8;
-          return (
-            <g>
-              <rect x={8} y={boxY} width={230} height={boxH} rx={7}
-                fill="rgba(10,18,35,.85)" stroke="rgba(255,255,255,.1)" strokeWidth={1} />
-              <text x={18} y={boxY+16} fill="rgba(255,255,255,.45)" fontSize={8}
-                fontFamily="monospace" letterSpacing="1.5">PLAGAS ACTIVAS</text>
-              {activePests.map((pest, i) => (
-                <g key={pest.id} transform={`translate(10,${boxY+22+i*20})`}>
-                  <circle cx={7} cy={7} r={6} fill={pest.color} />
-                  <text x={20} y={11.5} fill="#fff" fontSize={9} fontFamily="monospace">
-                    {pest.name.length > 25 ? pest.name.slice(0,25)+"…" : pest.name}
-                  </text>
-                </g>
-              ))}
-            </g>
-          );
-        })()}
       </svg>
+
+      {/* ══ LEYENDA — HTML overlay, dos modos ══ */}
+      {activePests.length > 0 && (
+        activePests.length <= 2 ? (
+          /* Vertical compacto — esquina inferior izquierda */
+          <div style={{
+            position:"absolute", bottom:12, left:12, zIndex:22,
+            background:"rgba(10,18,35,.88)", border:"1px solid rgba(255,255,255,.12)",
+            borderRadius:8, padding:"8px 12px", minWidth:160,
+            backdropFilter:"blur(4px)",
+          }}>
+            <div style={{ fontSize:8, color:"rgba(255,255,255,.45)", fontFamily:"monospace",
+              letterSpacing:"1.5px", textTransform:"uppercase", marginBottom:7 }}>
+              Plagas activas
+            </div>
+            {activePests.map(pest => (
+              <div key={pest.id} style={{ display:"flex", alignItems:"center", gap:7, marginBottom:4 }}>
+                <div style={{ width:10, height:10, borderRadius:"50%", background:pest.color, flexShrink:0 }} />
+                <span style={{ color:"#fff", fontSize:10, fontFamily:"monospace", whiteSpace:"nowrap" }}>
+                  {pest.name.length > 28 ? pest.name.slice(0,28)+"…" : pest.name}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          /* Barra horizontal — borde inferior, ancho completo */
+          <div style={{
+            position:"absolute", bottom:0, left:0,
+            right: sidebarOpen ? SB : 0,
+            zIndex:22,
+            background:"rgba(10,18,35,.91)", borderTop:"1px solid rgba(255,255,255,.12)",
+            padding:"6px 56px 6px 14px",
+            display:"flex", flexWrap:"wrap", alignItems:"center", gap:"6px 20px",
+            backdropFilter:"blur(4px)",
+          }}>
+            <span style={{ fontSize:8, color:"rgba(255,255,255,.4)", fontFamily:"monospace",
+              letterSpacing:"1.5px", textTransform:"uppercase", flexShrink:0 }}>
+              Plagas activas
+            </span>
+            {activePests.map(pest => (
+              <div key={pest.id} style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
+                <div style={{ width:9, height:9, borderRadius:"50%", background:pest.color }} />
+                <span style={{ color:"#fff", fontSize:10, fontFamily:"monospace", whiteSpace:"nowrap" }}>
+                  {pest.name.length > 30 ? pest.name.slice(0,30)+"…" : pest.name}
+                </span>
+              </div>
+            ))}
+          </div>
+        )
+      )}
 
       {/* ══ CONTROLES DE ZOOM ══ */}
       <div style={{
-        position:"absolute", bottom:16, left:16, zIndex:25,
+        position:"absolute",
+        bottom: activePests.length > 2 ? 38 : 16,
+        left:16, zIndex:25,
         display:"flex", flexDirection:"column", gap:4,
+        transition:"bottom .2s",
       }}>
         {[
           { label:"+", onClick: zoomIn,    title:"Acercar" },
