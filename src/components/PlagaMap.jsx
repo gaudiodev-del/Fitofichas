@@ -382,8 +382,21 @@ export default function PlagaMap() {
       }}>
         {/* Logo */}
         <div style={{ display:"flex", alignItems:"center", gap:9, flexShrink:0 }}>
-          <div style={{ width:30, height:30, background:"rgba(255,255,255,.18)", borderRadius:7,
-            display:"flex", alignItems:"center", justifyContent:"center", fontSize:15 }}>🌿</div>
+          <svg width="30" height="30" viewBox="0 0 30 30">
+            <rect width="30" height="30" rx="7" fill="rgba(255,255,255,.18)"/>
+            <circle cx="14" cy="16" r="11" fill="#1d4ed8" opacity={0.7}/>
+            <ellipse cx="14" cy="16" rx="5" ry="11" fill="none" stroke="rgba(255,255,255,.3)" strokeWidth=".8"/>
+            <line x1="3" y1="16" x2="25" y2="16" stroke="rgba(255,255,255,.3)" strokeWidth=".8"/>
+            <line x1="5" y1="10" x2="23" y2="10" stroke="rgba(255,255,255,.2)" strokeWidth=".6"/>
+            <line x1="5" y1="22" x2="23" y2="22" stroke="rgba(255,255,255,.2)" strokeWidth=".6"/>
+            <circle cx="14" cy="16" r="11" fill="none" stroke="rgba(255,255,255,.4)" strokeWidth=".8"/>
+            <ellipse cx="23" cy="7" rx="3.5" ry="5" fill="#fbbf24" transform="rotate(-30,23,7)"/>
+            <circle cx="21.5" cy="4.2" r="2.5" fill="#fbbf24"/>
+            <circle cx="20.8" cy="3.5" r=".8" fill="#0f172a"/>
+            <circle cx="22.4" cy="3.5" r=".8" fill="#0f172a"/>
+            <line x1="20.5" y1="2.5" x2="18.5" y2="1" stroke="#fbbf24" strokeWidth=".8" strokeLinecap="round"/>
+            <line x1="22.5" y1="2.5" x2="23.5" y2="1" stroke="#fbbf24" strokeWidth=".8" strokeLinecap="round"/>
+          </svg>
           <span style={{ color:"#fff", fontWeight:700, fontSize:14, letterSpacing:"-.2px", whiteSpace:"nowrap" }}>
             PlagaMap
             <span style={{ color:"rgba(255,255,255,.45)", fontWeight:400, fontSize:12 }}> · distribución global</span>
