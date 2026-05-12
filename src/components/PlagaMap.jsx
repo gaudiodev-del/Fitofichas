@@ -245,44 +245,6 @@ export default function PlagaMap() {
             ) : null;
           })}
 
-          {Object.entries(dotsByCountry).map(([iso2, pestList]) => {
-            const c = CTRD[iso2];
-            if (!c) return null;
-            const [cx, cy] = proj([c.lon, c.lat]);
-            const n       = pestList.length;
-            const spacing = 15;
-            const startX  = cx - ((n - 1) * spacing) / 2;
-            const isSel   = selCountry?.iso2 === iso2;
-            return (
-              <g key={iso2} style={{ cursor:"pointer" }}
-                onMouseMove={e => {
-                  if (!wrapRef.current) return;
-                  const r = wrapRef.current.getBoundingClientRect();
-                  setTt({ x:e.clientX-r.left, y:e.clientY-r.top, name:c.n, pestList });
-                }}
-                onMouseLeave={() => setTt(null)}
-                onClick={e => {
-                  e.stopPropagation();
-                  if (selCountry?.iso2 === iso2) { clearSelection(); return; }
-                  pestList[0] && loadPapers(pestList[0].pest, iso2, c.n);
-                }}
-              >
-                {isSel && <circle cx={cx} cy={cy} r={n*7+13}
-                  fill="none" stroke="#fff" strokeWidth={2} opacity={0.5} />}
-                {pestList.map(({ pest }, idx) => (
-                  <circle key={`g${pest.id}`}
-                    cx={startX + idx*spacing} cy={cy} r={12}
-                    fill={pest.color} opacity={0.18} />
-                ))}
-                {pestList.map(({ pest }, idx) => (
-                  <circle key={pest.id}
-                    cx={startX + idx*spacing} cy={cy} r={7}
-                    fill={pest.color} stroke="#fff" strokeWidth={2} />
-                ))}
-              </g>
-            );
-          })}
-
           {!hasPests && paths && (
             <text x={500} y={H/2} textAnchor="middle"
               fill="rgba(255,255,255,.25)" fontSize={13} fontFamily="monospace">
@@ -290,6 +252,47 @@ export default function PlagaMap() {
             </text>
           )}
         </g>
+
+        {/* Dots — fuera del zoom group: tamaño fijo en pantalla */}
+        {Object.entries(dotsByCountry).map(([iso2, pestList]) => {
+          const c = CTRD[iso2];
+          if (!c) return null;
+          const [px, py] = proj([c.lon, c.lat]);
+          const scx = (px - CX) * zoom + CX + pan.x;
+          const scy = (py - CY) * zoom + CY + pan.y;
+          const n       = pestList.length;
+          const spacing = 15;
+          const startX  = scx - ((n - 1) * spacing) / 2;
+          const isSel   = selCountry?.iso2 === iso2;
+          return (
+            <g key={iso2} style={{ cursor:"pointer" }}
+              onMouseMove={e => {
+                if (!wrapRef.current) return;
+                const r = wrapRef.current.getBoundingClientRect();
+                setTt({ x:e.clientX-r.left, y:e.clientY-r.top, name:c.n, pestList });
+              }}
+              onMouseLeave={() => setTt(null)}
+              onClick={e => {
+                e.stopPropagation();
+                if (selCountry?.iso2 === iso2) { clearSelection(); return; }
+                pestList[0] && loadPapers(pestList[0].pest, iso2, c.n);
+              }}
+            >
+              {isSel && <circle cx={scx} cy={scy} r={n*7+13}
+                fill="none" stroke="#fff" strokeWidth={2} opacity={0.5} />}
+              {pestList.map(({ pest }, idx) => (
+                <circle key={`g${pest.id}`}
+                  cx={startX + idx*spacing} cy={scy} r={12}
+                  fill={pest.color} opacity={0.18} />
+              ))}
+              {pestList.map(({ pest }, idx) => (
+                <circle key={pest.id}
+                  cx={startX + idx*spacing} cy={scy} r={7}
+                  fill={pest.color} stroke="#fff" strokeWidth={2} />
+              ))}
+            </g>
+          );
+        })}
 
         {/* Leyenda — fija, fuera del grupo de zoom */}
         {activePests.length > 0 && (() => {
