@@ -98,14 +98,17 @@ export default function PlagaMap() {
     try {
       const url = `${API}/works?search=${encodeURIComponent(name)}&group_by=institutions.country_code&per_page=200&mailto=${MAILTO}`;
       const data = await fetch(url).then(r => r.json());
+      console.log(`[PlagaMap] "${name}" → group_by:`, data.group_by?.length, 'grupos', data.group_by?.slice(0,5));
       const countries = {};
       (data.group_by || []).forEach(({ key, count }) => {
         if (key && key !== "unknown") countries[key.toUpperCase()] = count;
       });
+      console.log(`[PlagaMap] "${name}" → países ISO2:`, Object.keys(countries));
       setPests(prev => prev.map(p =>
         p.id === id ? { ...p, loading: false, countries, total: data.meta?.count || 0 } : p
       ));
-    } catch {
+    } catch (err) {
+      console.error(`[PlagaMap] Error fetching "${name}":`, err);
       setPests(prev => prev.map(p => p.id === id ? { ...p, loading: false } : p));
     }
   };
@@ -197,10 +200,10 @@ export default function PlagaMap() {
             {/* Dots agrupados por país */}
             {Object.entries(dotsByCountry).map(([iso2, pestList]) => {
               const c = CTRD[iso2];
-              if (!c) return null;
+              if (!c) { console.warn('[PlagaMap] CTRD missing:', iso2); return null; }
               const [cx, cy] = proj([c.lon, c.lat]);
               const n       = pestList.length;
-              const spacing = 12;
+              const spacing = 14;
               const startX  = cx - ((n - 1) * spacing) / 2;
               const isSel   = selCountry?.iso2 === iso2;
 
@@ -214,19 +217,34 @@ export default function PlagaMap() {
                   onMouseLeave={() => setTt(null)}
                   onClick={() => pestList[0] && loadPapers(pestList[0].pest, iso2, c.n)}
                 >
-                  {/* Anillo de selección */}
-                  {isSel && <circle cx={cx} cy={cy} r={n*6+9} fill="none" stroke="#fff" strokeWidth={3} opacity={0.6} />}
+                  {/* Halo de selección */}
+                  {isSel && <circle cx={cx} cy={cy} r={n*7+10} fill="none" stroke="#fff" strokeWidth={3} opacity={0.7} />}
 
-                  {/* Un dot por plaga, en fila horizontal centrada */}
+                  {/* Halo de visibilidad detrás de cada dot */}
+                  {pestList.map(({ pest }, idx) => (
+                    <circle key={`halo-${pest.id}`}
+                      cx={startX + idx * spacing} cy={cy} r={10}
+                      fill={pest.color} opacity={0.25}
+                    />
+                  ))}
+
+                  {/* Dot principal */}
                   {pestList.map(({ pest }, idx) => (
                     <circle key={pest.id}
-                      cx={startX + idx * spacing} cy={cy} r={5.5}
-                      fill={pest.color} stroke="#fff" strokeWidth={1.5}
+                      cx={startX + idx * spacing} cy={cy} r={7}
+                      fill={pest.color} stroke="#fff" strokeWidth={2}
                     />
                   ))}
                 </g>
               );
             })}
+
+            {/* Debug: cuántos países detectados */}
+            {hasPests && (
+              <text x={W-8} y={H-6} textAnchor="end" fill="#3a6080" fontSize={8} fontFamily="monospace" opacity={0.7}>
+                {Object.keys(dotsByCountry).length} países con datos
+              </text>
+            )}
 
             {/* Leyenda de plagas activas */}
             {activePests.length > 0 && (() => {
