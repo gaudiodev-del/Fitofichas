@@ -4,6 +4,8 @@ import { NUM2, CTRD } from "../constants";
 const W = 1000, H = 507;
 const API    = "https://api.openalex.org";
 const MAILTO = "gaudio.dev@gmail.com";
+const HDR    = 52; // altura header en px
+const SB     = 330; // ancho sidebar en px
 
 const proj = ([lon, lat]) => [
   ((lon + 180) / 360) * W,
@@ -16,32 +18,16 @@ const PALETTE = [
   "#84cc16","#f43f5e","#0ea5e9","#10b981","#fb923c",
 ];
 
-// Colores inspirados en geomap_app
-const C = {
-  accent:  "#2563eb",
-  accentH: "#1d4ed8",
-  accentL: "#eff6ff",
-  navy:    "#1e3a8a",
-  surface: "#ffffff",
-  bg:      "#f1f5f9",
-  border:  "#e2e8f0",
-  borderS: "#cbd5e1",
-  text:    "#0f172a",
-  muted:   "#64748b",
-  ocean:   "#1a3050",
-  land:    "#2d4a3e",
-  landH:   "#1e3a8a",
-};
-
 let _id = 0;
 const uid = () => ++_id;
 
 export default function PlagaMap() {
-  const svgRef = useRef();
+  const wrapRef = useRef();   // contenedor raíz (para tooltips)
   const [paths, setPaths] = useState(null);
   const [tt,    setTt]    = useState(null);
   const [pests, setPests] = useState([]);
   const [query, setQuery] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const [selCountry, setSelCountry] = useState(null);
   const [selPestId,  setSelPestId]  = useState(null);
@@ -55,7 +41,7 @@ export default function PlagaMap() {
       const ex = document.querySelector(`script[data-id="topojson"]`);
       if (ex) { ex.addEventListener("load", res); return; }
       const s = document.createElement("script");
-      s.src = src; s.setAttribute("data-id","topojson");
+      s.src = src; s.setAttribute("data-id", "topojson");
       s.onload = res; s.onerror = rej;
       document.head.appendChild(s);
     });
@@ -99,9 +85,10 @@ export default function PlagaMap() {
     const name = query.trim();
     if (!name) return;
     if (pests.some(p => p.name.toLowerCase() === name.toLowerCase())) { setQuery(""); return; }
-    const id = uid();
+    const id    = uid();
     const color = PALETTE[pests.length % PALETTE.length];
     setQuery("");
+    setSidebarOpen(true);
     setPests(prev => [...prev, { id, name, color, visible: true, loading: true, countries: {}, total: 0 }]);
     try {
       const url = `${API}/works?search=${encodeURIComponent(name)}&group_by=institutions.country_code&per_page=200&mailto=${MAILTO}`;
@@ -131,6 +118,7 @@ export default function PlagaMap() {
     setSelPestId(pest.id);
     setPapers([]);
     setPapersLoad(true);
+    setSidebarOpen(true);
     try {
       const fields = "id,title,doi,publication_year,authorships,primary_location,open_access";
       const url = `${API}/works?search=${encodeURIComponent(pest.name)}&filter=institutions.country_code:${iso2.toLowerCase()}&per_page=6&select=${fields}&mailto=${MAILTO}`;
@@ -155,371 +143,376 @@ export default function PlagaMap() {
 
   // ── Render ────────────────────────────────────────────────────────────
   return (
-    <div style={{ display:"flex", flexDirection:"column", height:"100%", fontFamily:"'Inter',system-ui,sans-serif", background:C.bg }}>
+    <div ref={wrapRef} style={{
+      position:"relative", width:"100%", height:"100%",
+      overflow:"hidden", background:"#0f1e35",
+      fontFamily:"'Inter',system-ui,sans-serif",
+    }}>
 
-      {/* ── Header / Barra de búsqueda ── */}
+      {/* ══ MAPA — ocupa todo el espacio ══ */}
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="xMidYMid slice"
+        style={{ position:"absolute", inset:0, width:"100%", height:"100%", display:"block" }}
+      >
+        <rect width={W} height={H} fill="#0f1e35" />
+
+        {paths === null && (
+          <text x={500} y={260} textAnchor="middle"
+            fill="rgba(255,255,255,.3)" fontSize={14} fontFamily="monospace">
+            Cargando mapa…
+          </text>
+        )}
+
+        {paths && paths.map((country, i) => {
+          const hasData = !!dotsByCountry[country.iso2];
+          return country.d ? (
+            <path key={i} d={country.d}
+              fill={hasData ? "#1e3a8a" : "#1e3326"}
+              stroke={hasData ? "#3b82f6" : "#142418"}
+              strokeWidth={hasData ? 0.6 : 0.25}
+              opacity={hasPests ? (hasData ? 0.92 : 0.3) : 0.65}
+            />
+          ) : null;
+        })}
+
+        {Object.entries(dotsByCountry).map(([iso2, pestList]) => {
+          const c = CTRD[iso2];
+          if (!c) return null;
+          const [cx, cy] = proj([c.lon, c.lat]);
+          const n       = pestList.length;
+          const spacing = 15;
+          const startX  = cx - ((n - 1) * spacing) / 2;
+          const isSel   = selCountry?.iso2 === iso2;
+          return (
+            <g key={iso2} style={{ cursor:"pointer" }}
+              onMouseMove={e => {
+                if (!wrapRef.current) return;
+                const r = wrapRef.current.getBoundingClientRect();
+                setTt({ x:e.clientX-r.left, y:e.clientY-r.top, name:c.n, pestList });
+              }}
+              onMouseLeave={() => setTt(null)}
+              onClick={() => pestList[0] && loadPapers(pestList[0].pest, iso2, c.n)}
+            >
+              {isSel && <circle cx={cx} cy={cy} r={n*7+13}
+                fill="none" stroke="#fff" strokeWidth={2} opacity={0.5} />}
+              {pestList.map(({ pest }, idx) => (
+                <circle key={`g${pest.id}`}
+                  cx={startX + idx*spacing} cy={cy} r={12}
+                  fill={pest.color} opacity={0.18} />
+              ))}
+              {pestList.map(({ pest }, idx) => (
+                <circle key={pest.id}
+                  cx={startX + idx*spacing} cy={cy} r={7}
+                  fill={pest.color} stroke="#fff" strokeWidth={2} />
+              ))}
+            </g>
+          );
+        })}
+
+        {/* Leyenda flotante inferior-izquierda */}
+        {activePests.length > 0 && (() => {
+          const boxH = activePests.length * 20 + 28;
+          const boxY = H - boxH - 8;
+          return (
+            <g>
+              <rect x={8} y={boxY} width={230} height={boxH} rx={7}
+                fill="rgba(10,18,35,.85)" stroke="rgba(255,255,255,.1)" strokeWidth={1} />
+              <text x={18} y={boxY+16} fill="rgba(255,255,255,.45)" fontSize={8}
+                fontFamily="monospace" letterSpacing="1.5">PLAGAS ACTIVAS</text>
+              {activePests.map((pest, i) => (
+                <g key={pest.id} transform={`translate(10,${boxY+22+i*20})`}>
+                  <circle cx={7} cy={7} r={6} fill={pest.color} />
+                  <text x={20} y={11.5} fill="#fff" fontSize={9} fontFamily="monospace">
+                    {pest.name.length > 25 ? pest.name.slice(0,25)+"…" : pest.name}
+                  </text>
+                </g>
+              ))}
+            </g>
+          );
+        })()}
+
+        {!hasPests && paths && (
+          <text x={500} y={H/2} textAnchor="middle"
+            fill="rgba(255,255,255,.25)" fontSize={13} fontFamily="monospace">
+            Agregá una plaga para visualizar su distribución global
+          </text>
+        )}
+      </svg>
+
+      {/* ══ HEADER flotante — top ══ */}
       <div style={{
+        position:"absolute", top:0, left:0, right:0, height:HDR, zIndex:20,
         background:"linear-gradient(135deg,#1e3a8a 0%,#1d4ed8 60%,#3b82f6 100%)",
-        padding:"0 20px", display:"flex", alignItems:"center", gap:12,
-        flexShrink:0, height:54, boxShadow:"0 2px 12px rgba(37,99,235,.4)", zIndex:10,
+        display:"flex", alignItems:"center", gap:12, padding:"0 16px",
+        boxShadow:"0 2px 16px rgba(0,0,0,.5)",
       }}>
         {/* Logo */}
         <div style={{ display:"flex", alignItems:"center", gap:9, flexShrink:0 }}>
-          <div style={{ width:32, height:32, background:"rgba(255,255,255,.18)", borderRadius:8, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16 }}>🌿</div>
-          <span style={{ color:"#fff", fontWeight:700, fontSize:15, letterSpacing:"-.3px" }}>
-            PlagaMap <span style={{ color:"rgba(255,255,255,.5)", fontWeight:400 }}>· distribución global</span>
+          <div style={{ width:30, height:30, background:"rgba(255,255,255,.18)", borderRadius:7,
+            display:"flex", alignItems:"center", justifyContent:"center", fontSize:15 }}>🌿</div>
+          <span style={{ color:"#fff", fontWeight:700, fontSize:14, letterSpacing:"-.2px", whiteSpace:"nowrap" }}>
+            PlagaMap
+            <span style={{ color:"rgba(255,255,255,.45)", fontWeight:400, fontSize:12 }}> · distribución global</span>
           </span>
         </div>
 
         {/* Buscador */}
-        <div style={{ flex:1, display:"flex", gap:8, maxWidth:560 }}>
+        <div style={{ flex:1, display:"flex", gap:8, maxWidth:520 }}>
           <input
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={e => e.key === "Enter" && addPest()}
-            placeholder="Nombre científico de la plaga… Ej: Sorghum halepense"
+            placeholder="Nombre científico…  Ej: Sorghum halepense"
             style={{
-              flex:1, padding:"8px 14px",
-              background:"rgba(255,255,255,.12)", border:"1px solid rgba(255,255,255,.25)",
-              borderRadius:8, color:"#fff", fontSize:"0.84rem", outline:"none",
-              fontFamily:"inherit",
+              flex:1, padding:"7px 13px",
+              background:"rgba(255,255,255,.13)", border:"1px solid rgba(255,255,255,.22)",
+              borderRadius:8, color:"#fff", fontSize:"0.82rem",
+              outline:"none", fontFamily:"inherit",
             }}
           />
           <button onClick={addPest} style={{
-            padding:"8px 18px", background:"rgba(255,255,255,.2)",
-            border:"1px solid rgba(255,255,255,.35)", borderRadius:8,
-            color:"#fff", fontWeight:700, cursor:"pointer", fontSize:"0.84rem",
-            flexShrink:0, transition:"all .2s",
+            padding:"7px 16px",
+            background:"rgba(255,255,255,.18)", border:"1px solid rgba(255,255,255,.3)",
+            borderRadius:8, color:"#fff", fontWeight:700, cursor:"pointer",
+            fontSize:"0.82rem", flexShrink:0, transition:"all .2s",
           }}
-            onMouseOver={e => e.currentTarget.style.background="rgba(255,255,255,.32)"}
-            onMouseOut={e  => e.currentTarget.style.background="rgba(255,255,255,.2)"}
+            onMouseOver={e => e.currentTarget.style.background="rgba(255,255,255,.30)"}
+            onMouseOut={e  => e.currentTarget.style.background="rgba(255,255,255,.18)"}
           >+ Agregar</button>
         </div>
 
         {/* Stats */}
         {hasPests && (
-          <div style={{ display:"flex", gap:8, marginLeft:"auto", flexShrink:0 }}>
-            <div style={{ background:"rgba(255,255,255,.12)", border:"1px solid rgba(255,255,255,.2)", borderRadius:8, padding:"3px 12px", textAlign:"center" }}>
-              <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:15, fontWeight:600, color:"#fff", lineHeight:1 }}>{pests.length}</div>
-              <div style={{ fontSize:9, color:"rgba(255,255,255,.55)", textTransform:"uppercase", letterSpacing:1, marginTop:2 }}>plagas</div>
+          <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+            {[
+              { n: pests.length,  l:"plagas" },
+              { n: totalDots,     l:"países" },
+            ].map(({ n, l }) => (
+              <div key={l} style={{
+                background:"rgba(255,255,255,.12)", border:"1px solid rgba(255,255,255,.18)",
+                borderRadius:8, padding:"2px 11px", textAlign:"center",
+              }}>
+                <div style={{ fontFamily:"monospace", fontSize:14, fontWeight:700, color:"#fff", lineHeight:1 }}>{n}</div>
+                <div style={{ fontSize:8, color:"rgba(255,255,255,.5)", textTransform:"uppercase", letterSpacing:1, marginTop:1 }}>{l}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Toggle sidebar */}
+        <button onClick={() => setSidebarOpen(o => !o)} title={sidebarOpen ? "Ocultar panel" : "Mostrar panel"}
+          style={{
+            marginLeft:"auto", width:30, height:30, borderRadius:7, border:"1px solid rgba(255,255,255,.25)",
+            background:"rgba(255,255,255,.13)", color:"#fff", cursor:"pointer",
+            fontSize:14, display:"flex", alignItems:"center", justifyContent:"center",
+            flexShrink:0,
+          }}>
+          {sidebarOpen ? "▶" : "◀"}
+        </button>
+      </div>
+
+      {/* ══ SIDEBAR flotante — derecha ══ */}
+      <div style={{
+        position:"absolute", top:HDR, right: sidebarOpen ? 0 : -SB,
+        bottom:0, width:SB, zIndex:15,
+        background:"rgba(255,255,255,.97)",
+        borderLeft:"1px solid rgba(0,0,0,.12)",
+        boxShadow:"-4px 0 20px rgba(0,0,0,.25)",
+        display:"flex", flexDirection:"column", overflow:"hidden",
+        transition:"right .25s ease",
+        backdropFilter:"blur(6px)",
+      }}>
+
+        {/* Plagas cargadas */}
+        <div style={{
+          padding:"14px 14px 10px", borderBottom:"1px solid #e2e8f0", flexShrink:0,
+        }}>
+          <div style={{ fontSize:9, fontWeight:700, letterSpacing:"1.5px",
+            textTransform:"uppercase", color:"#64748b", marginBottom:10,
+            display:"flex", alignItems:"center", gap:7 }}>
+            <div style={{ width:18, height:18, background:"#eff6ff", borderRadius:4,
+              display:"flex", alignItems:"center", justifyContent:"center", fontSize:10 }}>🌱</div>
+            Plagas cargadas
+          </div>
+
+          {pests.length === 0 ? (
+            <div style={{ textAlign:"center", padding:"20px 8px", color:"#94a3b8",
+              fontSize:"0.7rem", lineHeight:1.8 }}>
+              <div style={{ fontSize:"1.8rem", opacity:.18, marginBottom:6 }}>🔬</div>
+              Usá el buscador del encabezado para agregar plagas
             </div>
-            <div style={{ background:"rgba(255,255,255,.12)", border:"1px solid rgba(255,255,255,.2)", borderRadius:8, padding:"3px 12px", textAlign:"center" }}>
-              <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:15, fontWeight:600, color:"#fff", lineHeight:1 }}>{totalDots}</div>
-              <div style={{ fontSize:9, color:"rgba(255,255,255,.55)", textTransform:"uppercase", letterSpacing:1, marginTop:2 }}>países</div>
+          ) : (
+            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+              {pests.map(pest => (
+                <div key={pest.id} style={{
+                  display:"flex", alignItems:"center", gap:8, padding:"8px 10px",
+                  background: pest.visible ? "#eff6ff" : "#f8fafc",
+                  border:`1.5px solid ${pest.visible ? pest.color+"55" : "#e2e8f0"}`,
+                  borderRadius:9, transition:"all .15s",
+                  opacity: pest.visible ? 1 : 0.5,
+                }}>
+                  <input type="checkbox" checked={pest.visible} onChange={() => togglePest(pest.id)}
+                    style={{ width:13, height:13, accentColor:pest.color, cursor:"pointer", flexShrink:0 }} />
+                  <div style={{ width:9, height:9, borderRadius:"50%", background:pest.color,
+                    flexShrink:0, boxShadow:`0 0 0 3px ${pest.color}22` }} />
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:"0.7rem", fontWeight:600, color:"#0f172a",
+                      whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                      {pest.name}
+                    </div>
+                    <div style={{ fontFamily:"monospace", fontSize:"0.58rem", color:"#64748b", marginTop:1 }}>
+                      {pest.loading ? "Buscando…"
+                        : `${Object.keys(pest.countries).length} países · ${pest.total.toLocaleString()} arts.`}
+                    </div>
+                  </div>
+                  {pest.loading
+                    ? <div style={{ width:12, height:12, border:"2px solid #e2e8f0",
+                        borderTop:`2px solid ${pest.color}`, borderRadius:"50%",
+                        animation:"spin .7s linear infinite", flexShrink:0 }} />
+                    : <button onClick={() => removePest(pest.id)} style={{
+                        background:"none", border:"none", color:"#94a3b8",
+                        cursor:"pointer", fontSize:"1.1rem", padding:0, lineHeight:1, flexShrink:0,
+                      }}
+                        onMouseOver={e => e.currentTarget.style.color="#ef4444"}
+                        onMouseOut={e  => e.currentTarget.style.color="#94a3b8"}>×</button>
+                  }
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Panel artículos */}
+        {selCountry ? (
+          <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+            <div style={{ padding:"10px 14px", background:"#0f172a", flexShrink:0 }}>
+              <div style={{ fontSize:"0.72rem", fontWeight:700, color:"#fff", marginBottom:6 }}>
+                📄 {selCountry.name}
+              </div>
+              <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+                {pests.filter(p => p.visible && p.countries[selCountry.iso2]).map(pest => (
+                  <button key={pest.id}
+                    onClick={() => loadPapers(pest, selCountry.iso2, selCountry.name)}
+                    style={{
+                      padding:"3px 8px", borderRadius:5, border:"none", cursor:"pointer",
+                      fontFamily:"monospace", fontSize:"0.59rem", fontWeight:700,
+                      background: selPestId===pest.id ? pest.color : `${pest.color}30`,
+                      color: selPestId===pest.id ? "#fff" : pest.color,
+                      transition:"all .15s",
+                    }}>
+                    {pest.name.length>14?pest.name.slice(0,14)+"…":pest.name}
+                    <span style={{ opacity:.7, marginLeft:3 }}>({pest.countries[selCountry.iso2]})</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ flex:1, overflowY:"auto", padding:"10px 12px" }}>
+              {papersLoad && (
+                <div style={{ textAlign:"center", padding:"20px", color:"#64748b", fontSize:"0.7rem" }}>
+                  Cargando artículos…
+                </div>
+              )}
+              {!papersLoad && papers.length === 0 && selPestId && (
+                <div style={{ textAlign:"center", padding:"20px", color:"#64748b", fontSize:"0.7rem" }}>
+                  Sin resultados para este país
+                </div>
+              )}
+              {!papersLoad && papers.map((paper, i) => {
+                const doi     = paper.doi?.replace("https://doi.org/","");
+                const journal = paper.primary_location?.source?.display_name || "";
+                const isOA    = paper.open_access?.is_oa;
+                const auths   = (paper.authorships||[]).slice(0,2)
+                  .map(a => a.author?.display_name).filter(Boolean).join("; ");
+                const extra   = (paper.authorships||[]).length > 2
+                  ? ` +${paper.authorships.length-2}` : "";
+                const selPest = pests.find(p => p.id === selPestId);
+                return (
+                  <div key={paper.id||i} style={{
+                    background:"#f8fafc", border:"1px solid #e2e8f0",
+                    borderLeft:`3px solid ${selPest?.color||"#2563eb"}`,
+                    borderRadius:8, padding:"9px 11px", marginBottom:7,
+                  }}>
+                    <div style={{ fontFamily:"monospace", fontSize:"0.57rem", color:"#64748b", marginBottom:2 }}>
+                      {paper.publication_year||"—"}
+                      {journal && <span> · {journal.length>26?journal.slice(0,26)+"…":journal}</span>}
+                    </div>
+                    <div style={{ fontSize:"0.71rem", fontWeight:600, color:"#0f172a",
+                      lineHeight:1.38, marginBottom:4 }}>
+                      {paper.title||"Sin título"}
+                    </div>
+                    {auths && (
+                      <div style={{ fontSize:"0.59rem", color:"#64748b", marginBottom:5 }}>
+                        {auths}{extra}
+                      </div>
+                    )}
+                    <div style={{ display:"flex", gap:5 }}>
+                      {doi && (
+                        <a href={`https://doi.org/${doi}`} target="_blank" rel="noopener noreferrer"
+                          style={{ fontSize:"0.59rem", padding:"2px 8px", borderRadius:4,
+                            background:"#eff6ff", color:"#2563eb",
+                            textDecoration:"none", fontWeight:700, border:"1px solid #bfdbfe" }}>
+                          ↗ DOI
+                        </a>
+                      )}
+                      {isOA && (
+                        <span style={{ fontSize:"0.59rem", padding:"2px 8px", borderRadius:4,
+                          background:"#f0fdf4", color:"#16a34a", fontWeight:700,
+                          border:"1px solid #bbf7d0" }}>
+                          Acceso Abierto
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center",
+            flexDirection:"column", gap:10, color:"#94a3b8", padding:20, textAlign:"center" }}>
+            <div style={{ fontSize:"2.5rem", opacity:.13 }}>🗺️</div>
+            <div style={{ fontSize:"0.7rem", lineHeight:1.7 }}>
+              Hacé clic en un punto del mapa para ver artículos científicos de ese país
             </div>
           </div>
         )}
       </div>
 
-      {/* ── Cuerpo: mapa + sidebar ── */}
-      <div style={{ flex:1, display:"flex", overflow:"hidden" }}>
-
-        {/* ── Mapa SVG ── */}
-        <div ref={svgRef} style={{ flex:1, position:"relative", overflow:"hidden", background:C.ocean }}>
-          <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", height:"100%", display:"block" }}>
-
-            {/* Océano */}
-            <rect width={W} height={H} fill={C.ocean} />
-
-            {paths === null && (
-              <text x={500} y={260} textAnchor="middle" fill="rgba(255,255,255,.4)" fontSize={13} fontFamily="monospace">
-                Cargando mapa…
-              </text>
-            )}
-
-            {/* Países */}
-            {paths && paths.map((country, i) => {
-              const hasData = !!dotsByCountry[country.iso2];
-              return country.d ? (
-                <path key={i} d={country.d}
-                  fill={hasData ? "#1e40af" : "#2d4a3e"}
-                  stroke={hasData ? "#3b82f6" : "#1a3330"}
-                  strokeWidth={hasData ? 0.7 : 0.3}
-                  opacity={hasPests ? (hasData ? 0.9 : 0.35) : 0.7}
-                />
-              ) : null;
-            })}
-
-            {/* Dots por país */}
-            {Object.entries(dotsByCountry).map(([iso2, pestList]) => {
-              const c = CTRD[iso2];
-              if (!c) return null;
-              const [cx, cy] = proj([c.lon, c.lat]);
-              const n       = pestList.length;
-              const spacing = 15;
-              const startX  = cx - ((n - 1) * spacing) / 2;
-              const isSel   = selCountry?.iso2 === iso2;
-
-              return (
-                <g key={iso2} style={{ cursor:"pointer" }}
-                  onMouseMove={e => {
-                    if (!svgRef.current) return;
-                    const r = svgRef.current.getBoundingClientRect();
-                    setTt({ x:e.clientX-r.left, y:e.clientY-r.top, name:c.n, pestList });
-                  }}
-                  onMouseLeave={() => setTt(null)}
-                  onClick={() => pestList[0] && loadPapers(pestList[0].pest, iso2, c.n)}
-                >
-                  {/* Halo selección */}
-                  {isSel && <circle cx={cx} cy={cy} r={n*7+12} fill="none" stroke="#fff" strokeWidth={2.5} opacity={0.6} />}
-
-                  {/* Halo glow */}
-                  {pestList.map(({ pest }, idx) => (
-                    <circle key={`g-${pest.id}`}
-                      cx={startX + idx * spacing} cy={cy} r={11}
-                      fill={pest.color} opacity={0.2}
-                    />
-                  ))}
-
-                  {/* Dot */}
-                  {pestList.map(({ pest }, idx) => (
-                    <circle key={pest.id}
-                      cx={startX + idx * spacing} cy={cy} r={7}
-                      fill={pest.color} stroke="#fff" strokeWidth={2}
-                    />
-                  ))}
-                </g>
-              );
-            })}
-
-            {/* Leyenda */}
-            {activePests.length > 0 && (() => {
-              const boxH = activePests.length * 19 + 26;
-              const boxY = H - boxH - 6;
-              return (
-                <g>
-                  <rect x={6} y={boxY} width={220} height={boxH} rx={6}
-                    fill="rgba(15,23,42,.82)" stroke="rgba(255,255,255,.12)" strokeWidth={1} />
-                  <text x={16} y={boxY+15} fill="rgba(255,255,255,.5)" fontSize={8}
-                    fontFamily="'JetBrains Mono',monospace" fontWeight="bold" letterSpacing="1.5">
-                    PLAGAS ACTIVAS
-                  </text>
-                  {activePests.map((pest, i) => (
-                    <g key={pest.id} transform={`translate(10,${boxY+21+i*19})`}>
-                      <circle cx={7} cy={7} r={6} fill={pest.color} />
-                      <text x={19} y={11} fill="#fff" fontSize={9} fontFamily="'JetBrains Mono',monospace">
-                        {pest.name.length > 24 ? pest.name.slice(0,24)+"…" : pest.name}
-                      </text>
-                    </g>
-                  ))}
-                </g>
-              );
-            })()}
-
-            {/* Mensaje vacío */}
-            {!hasPests && paths && (
-              <text x={500} y={H/2} textAnchor="middle" fill="rgba(255,255,255,.3)" fontSize={13} fontFamily="monospace">
-                Agregá una plaga para visualizar su distribución global
-              </text>
-            )}
-          </svg>
-
-          {/* Tooltip */}
-          {tt && (
-            <div style={{
-              position:"absolute",
-              left:Math.min(tt.x+14,(svgRef.current?.offsetWidth||700)-240),
-              top:Math.max(tt.y-70,4),
-              background:"rgba(15,23,42,.95)", border:"1px solid rgba(255,255,255,.15)",
-              borderRadius:10, padding:"10px 14px",
-              fontFamily:"'Inter',system-ui,sans-serif", fontSize:"0.7rem", color:"#fff",
-              pointerEvents:"none", boxShadow:"0 8px 24px rgba(0,0,0,.4)", zIndex:20, minWidth:170,
-            }}>
-              <div style={{ fontWeight:700, marginBottom:6, fontSize:"0.76rem",
-                borderBottom:"1px solid rgba(255,255,255,.12)", paddingBottom:5 }}>
-                {tt.name}
-              </div>
-              {tt.pestList.map(({ pest, count }) => (
-                <div key={pest.id} style={{ display:"flex", alignItems:"center", gap:7, marginBottom:4 }}>
-                  <div style={{ width:8, height:8, borderRadius:"50%", background:pest.color, flexShrink:0 }}/>
-                  <span style={{ color:"rgba(255,255,255,.7)", flex:1, fontSize:"0.68rem" }}>
-                    {pest.name.length>22?pest.name.slice(0,22)+"…":pest.name}
-                  </span>
-                  <span style={{ color:pest.color, fontWeight:700, fontFamily:"monospace" }}>{count.toLocaleString()}</span>
-                </div>
-              ))}
-              <div style={{ fontSize:"0.6rem", color:"rgba(255,255,255,.35)", marginTop:5 }}>
-                Clic para ver artículos
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* ── Panel lateral derecho ── */}
+      {/* ══ TOOLTIP ══ */}
+      {tt && (
         <div style={{
-          width:320, flexShrink:0, background:C.surface,
-          borderLeft:`1px solid ${C.border}`,
-          display:"flex", flexDirection:"column", overflow:"hidden",
-          boxShadow:"-2px 0 12px rgba(0,0,0,.06)",
+          position:"absolute", zIndex:30, pointerEvents:"none",
+          left: Math.min(tt.x+14, (wrapRef.current?.offsetWidth||800) - (sidebarOpen ? SB+10 : 250)),
+          top:  Math.max(tt.y-70, HDR+8),
+          background:"rgba(10,18,35,.95)", border:"1px solid rgba(255,255,255,.12)",
+          borderRadius:10, padding:"10px 14px",
+          boxShadow:"0 8px 28px rgba(0,0,0,.5)", minWidth:170,
+          fontFamily:"'Inter',system-ui,sans-serif",
         }}>
-
-          {/* Header sidebar */}
-          <div style={{
-            padding:"14px 16px", borderBottom:`1px solid ${C.border}`,
-            background:C.surface, flexShrink:0,
-          }}>
-            <div style={{ fontSize:10, fontWeight:700, letterSpacing:"1.5px",
-              textTransform:"uppercase", color:C.muted, marginBottom:10,
-              display:"flex", alignItems:"center", gap:8 }}>
-              <div style={{ width:20, height:20, background:C.accentL, borderRadius:5,
-                display:"flex", alignItems:"center", justifyContent:"center", fontSize:11 }}>🌱</div>
-              Plagas cargadas
-            </div>
-
-            {pests.length === 0 ? (
-              <div style={{ textAlign:"center", padding:"24px 8px", color:C.muted, fontSize:"0.72rem", lineHeight:1.8 }}>
-                <div style={{ fontSize:"2rem", opacity:.2, marginBottom:8 }}>🔬</div>
-                Usá el buscador para agregar plagas y visualizar su distribución mundial
-              </div>
-            ) : (
-              <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
-                {pests.map(pest => (
-                  <div key={pest.id} style={{
-                    display:"flex", alignItems:"center", gap:8,
-                    padding:"9px 11px",
-                    background: pest.visible ? C.accentL : C.bg,
-                    border:`1.5px solid ${pest.visible ? pest.color+"55" : C.border}`,
-                    borderRadius:10, transition:"all .15s",
-                    opacity: pest.visible ? 1 : 0.5,
-                  }}>
-                    <input type="checkbox" checked={pest.visible} onChange={() => togglePest(pest.id)}
-                      style={{ width:14, height:14, accentColor:pest.color, cursor:"pointer", flexShrink:0 }} />
-                    <div style={{ width:10, height:10, borderRadius:"50%", background:pest.color,
-                      flexShrink:0, boxShadow:`0 0 0 3px ${pest.color}22` }} />
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontSize:"0.72rem", fontWeight:600, color:C.text,
-                        whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
-                        {pest.name}
-                      </div>
-                      <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:"0.59rem", color:C.muted, marginTop:1 }}>
-                        {pest.loading ? "Buscando…"
-                          : `${Object.keys(pest.countries).length} países · ${pest.total.toLocaleString()} arts.`}
-                      </div>
-                    </div>
-                    {pest.loading && (
-                      <div style={{ width:13, height:13, border:`2px solid ${C.border}`,
-                        borderTop:`2px solid ${pest.color}`, borderRadius:"50%",
-                        animation:"spin .7s linear infinite", flexShrink:0 }} />
-                    )}
-                    {!pest.loading && (
-                      <button onClick={() => removePest(pest.id)} style={{
-                        background:"none", border:"none", color:C.muted, cursor:"pointer",
-                        fontSize:"1.1rem", padding:"0 2px", lineHeight:1, flexShrink:0, borderRadius:4,
-                      }}
-                        onMouseOver={e => e.currentTarget.style.color="#ef4444"}
-                        onMouseOut={e  => e.currentTarget.style.color=C.muted}>×</button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
+          <div style={{ fontWeight:700, color:"#fff", fontSize:"0.74rem",
+            borderBottom:"1px solid rgba(255,255,255,.1)", paddingBottom:5, marginBottom:6 }}>
+            {tt.name}
           </div>
-
-          {/* Panel artículos */}
-          {selCountry ? (
-            <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
-              {/* Sub-header país */}
-              <div style={{ padding:"11px 16px", background:"#0f172a", flexShrink:0 }}>
-                <div style={{ fontSize:"0.74rem", fontWeight:700, color:"#fff", marginBottom:7 }}>
-                  📄 {selCountry.name}
-                </div>
-                <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
-                  {pests.filter(p => p.visible && p.countries[selCountry.iso2]).map(pest => (
-                    <button key={pest.id}
-                      onClick={() => loadPapers(pest, selCountry.iso2, selCountry.name)}
-                      style={{
-                        padding:"3px 9px", borderRadius:5, border:"none", cursor:"pointer",
-                        fontFamily:"monospace", fontSize:"0.6rem", fontWeight:700, transition:"all .15s",
-                        background: selPestId===pest.id ? pest.color : `${pest.color}30`,
-                        color: selPestId===pest.id ? "#fff" : pest.color,
-                      }}>
-                      {pest.name.length>14?pest.name.slice(0,14)+"…":pest.name}
-                      <span style={{ opacity:.7, marginLeft:4 }}>({pest.countries[selCountry.iso2]})</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Lista artículos */}
-              <div style={{ flex:1, overflowY:"auto", padding:"12px" }}>
-                {papersLoad && (
-                  <div style={{ textAlign:"center", padding:"24px", color:C.muted, fontSize:"0.72rem" }}>
-                    Cargando artículos…
-                  </div>
-                )}
-                {!papersLoad && papers.length === 0 && selPestId && (
-                  <div style={{ textAlign:"center", padding:"24px", color:C.muted, fontSize:"0.72rem" }}>
-                    Sin resultados para este país
-                  </div>
-                )}
-                {!papersLoad && papers.map((paper, i) => {
-                  const doi     = paper.doi?.replace("https://doi.org/","");
-                  const journal = paper.primary_location?.source?.display_name || "";
-                  const isOA    = paper.open_access?.is_oa;
-                  const auths   = (paper.authorships||[]).slice(0,2)
-                    .map(a => a.author?.display_name).filter(Boolean).join("; ");
-                  const extra   = (paper.authorships||[]).length > 2
-                    ? ` +${paper.authorships.length-2}` : "";
-                  const selPest = pests.find(p => p.id === selPestId);
-                  return (
-                    <div key={paper.id||i} style={{
-                      background:C.bg, border:`1px solid ${C.border}`,
-                      borderLeft:`3px solid ${selPest?.color||C.accent}`,
-                      borderRadius:8, padding:"10px 12px", marginBottom:8,
-                      transition:".15s",
-                    }}>
-                      <div style={{ fontFamily:"monospace", fontSize:"0.58rem", color:C.muted, marginBottom:3 }}>
-                        {paper.publication_year||"—"}
-                        {journal && <span> · {journal.length>28?journal.slice(0,28)+"…":journal}</span>}
-                      </div>
-                      <div style={{ fontSize:"0.73rem", fontWeight:600, color:C.text,
-                        lineHeight:1.38, marginBottom:5 }}>
-                        {paper.title||"Sin título"}
-                      </div>
-                      {auths && (
-                        <div style={{ fontSize:"0.6rem", color:C.muted, marginBottom:6 }}>
-                          {auths}{extra}
-                        </div>
-                      )}
-                      <div style={{ display:"flex", gap:5 }}>
-                        {doi && (
-                          <a href={`https://doi.org/${doi}`} target="_blank" rel="noopener noreferrer"
-                            style={{ fontSize:"0.6rem", padding:"2px 9px", borderRadius:4,
-                              background:C.accentL, color:C.accent,
-                              textDecoration:"none", fontWeight:700,
-                              border:`1px solid #bfdbfe` }}>
-                            ↗ DOI
-                          </a>
-                        )}
-                        {isOA && (
-                          <span style={{ fontSize:"0.6rem", padding:"2px 9px", borderRadius:4,
-                            background:"#f0fdf4", color:"#16a34a", fontWeight:700,
-                            border:"1px solid #bbf7d0" }}>
-                            Acceso Abierto
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+          {tt.pestList.map(({ pest, count }) => (
+            <div key={pest.id} style={{ display:"flex", alignItems:"center", gap:7, marginBottom:4 }}>
+              <div style={{ width:8, height:8, borderRadius:"50%", background:pest.color, flexShrink:0 }} />
+              <span style={{ color:"rgba(255,255,255,.65)", flex:1, fontSize:"0.67rem" }}>
+                {pest.name.length>22?pest.name.slice(0,22)+"…":pest.name}
+              </span>
+              <span style={{ color:pest.color, fontWeight:700, fontFamily:"monospace", fontSize:"0.7rem" }}>
+                {count.toLocaleString()}
+              </span>
             </div>
-          ) : (
-            <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center",
-              flexDirection:"column", gap:10, color:C.muted, padding:20, textAlign:"center" }}>
-              <div style={{ fontSize:"2.5rem", opacity:.15 }}>🗺️</div>
-              <div style={{ fontSize:"0.72rem", lineHeight:1.7 }}>
-                Hacé clic en un punto del mapa para ver los artículos científicos de ese país
-              </div>
-            </div>
-          )}
+          ))}
+          <div style={{ fontSize:"0.58rem", color:"rgba(255,255,255,.3)", marginTop:5 }}>
+            Clic para ver artículos
+          </div>
         </div>
-      </div>
+      )}
 
-      <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
-      `}</style>
+      <style>{`@keyframes spin { to { transform:rotate(360deg); } }`}</style>
     </div>
   );
 }
