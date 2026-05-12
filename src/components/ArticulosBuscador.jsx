@@ -47,8 +47,13 @@ function detectarIdioma(texto) {
   const es = (t.match(/[áéíóúñü]/g) || []).length * 2 +
              (t.match(/\b(de|la|el|en|que|una|para|por|con|del|se|los|las)\b/g) || []).length;
   const en = (t.match(/\b(the|of|in|an|to|for|by|from|with|and|is|are|was|were)\b/g) || []).length;
-  if (es > en * 1.2) return "es";
-  if (en > es * 1.2) return "en";
+  const fr = (t.match(/[àâæçèêëîïôœùûü]/g) || []).length * 2 +
+             (t.match(/\b(de|la|le|les|du|des|en|un|une|pour|par|avec|est|dans|sur|que)\b/g) || []).length;
+  const max = Math.max(es, en, fr);
+  if (max === 0) return null;
+  if (fr > es * 1.2 && fr > en * 1.2) return "fr";
+  if (es > en * 1.2 && es > fr * 1.2) return "es";
+  if (en > es * 1.2 && en > fr * 1.2) return "en";
   return null;
 }
 
@@ -544,11 +549,11 @@ function SetBusqueda({ set, onEliminar, onActualizarArticulo }) {
                 display: "inline-flex", alignItems: "center", gap: 5,
               }}>
                 <img
-                  src={`https://flagcdn.com/16x12/${params.idioma}.png`}
+                  src={`https://flagcdn.com/16x12/${params.idioma === "en" ? "gb" : params.idioma}.png`}
                   alt={params.idioma}
                   style={{ width: 16, height: 12, borderRadius: 1 }}
                 />
-                {params.idioma === "es" ? "Español" : "Inglés"}
+                {params.idioma === "es" ? "Español" : params.idioma === "fr" ? "Français" : "Inglés"}
               </span>
             )}
           </div>
@@ -869,6 +874,7 @@ export default function ArticulosBuscador({ authUser }) {
                 { val: null, icon: null,   text: "Todos los idiomas" },
                 { val: "es", icon: "https://flagcdn.com/20x15/es.png", text: "Español" },
                 { val: "en", icon: "https://flagcdn.com/20x15/gb.png", text: "Inglés"  },
+                { val: "fr", icon: "https://flagcdn.com/20x15/fr.png", text: "Français" },
               ].map(({ val, icon, text }) => (
                 <button key={String(val)} onClick={() => setIdioma(val)} style={{
                   ...BTN,
