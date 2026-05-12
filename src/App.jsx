@@ -459,7 +459,7 @@ export default function App() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: P.bg, color: P.txt, fontFamily: "'Inter','Segoe UI',sans-serif" }}>
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden", background: P.bg, color: P.txt, fontFamily: "'Inter','Segoe UI',sans-serif" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');*{box-sizing:border-box;margin:0;padding:0}@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}`}</style>
 
       {/* HEADER */}
@@ -510,6 +510,12 @@ export default function App() {
         </div>
       </div>
 
+      {tab === "plagamap" ? (
+        <div style={{ flex: 1, overflow: "hidden" }}>
+          <PlagaMap />
+        </div>
+      ) : (
+      <div style={{ flex: 1, overflowY: "auto" }}>
       <div style={{ maxWidth: 1040, margin: "0 auto", padding: "24px 20px" }}>
 
         {tab === "nueva" && authRole === 'admin' && (
@@ -675,10 +681,11 @@ export default function App() {
           )
         )}
         {tab === "articulos" && <ArticulosBuscador authUser={authUser} />}
-        {tab === "plagamap"  && <PlagaMap />}
         {tab === "equipos"   && <EquiposManager   authUser={authUser} authRole={authRole} />}
         {tab === "roles" && authRole === 'admin' && <RolesManager authUser={authUser} />}
       </div>
+      </div>
+      )}
 
       <ModalErrorBoundary onClose={() => setView(null)}>
         {view && !edit && <ViewModal />}
